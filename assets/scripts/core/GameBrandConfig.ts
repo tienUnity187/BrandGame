@@ -1,1 +1,1 @@
-export const GAME_NAME = 'SGFood';
+export const GAME_NAME = 'Hippy';
