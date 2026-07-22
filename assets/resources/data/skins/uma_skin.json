@@ -29,11 +29,6 @@
         "assetType": "sprite"
       },
       {
-        "key": "tile_5",
-        "path": "skins/uma/tiles/5",
-        "assetType": "sprite"
-      },
-      {
         "key": "tile_6",
         "path": "skins/uma/tiles/6",
         "assetType": "sprite"
@@ -46,36 +41,6 @@
       {
         "key": "tile_8",
         "path": "skins/uma/tiles/8",
-        "assetType": "sprite"
-      },
-      {
-        "key": "tile_9",
-        "path": "skins/uma/tiles/9",
-        "assetType": "sprite"
-      },
-      {
-        "key": "tile_10",
-        "path": "skins/uma/tiles/10",
-        "assetType": "sprite"
-      },
-      {
-        "key": "tile_11",
-        "path": "skins/uma/tiles/11",
-        "assetType": "sprite"
-      },
-      {
-        "key": "tile_12",
-        "path": "skins/uma/tiles/12",
-        "assetType": "sprite"
-      },
-      {
-        "key": "tile_13",
-        "path": "skins/uma/tiles/13",
-        "assetType": "sprite"
-      },
-      {
-        "key": "tile_14",
-        "path": "skins/uma/tiles/14",
         "assetType": "sprite"
       }
     ],
@@ -162,15 +127,8 @@
     "2",
     "3",
     "4",
-    "5",
     "6",
     "7",
-    "8",
-    "9",
-    "10",
-    "11",
-    "12",
-    "13",
-    "14"
+    "8"
   ]
 }

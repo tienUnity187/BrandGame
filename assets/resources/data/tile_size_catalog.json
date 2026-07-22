@@ -1,62 +1,34 @@
 {
   "0": {
-    "width": 159,
-    "height": 188
+    "width": 128,
+    "height": 208
   },
   "1": {
-    "width": 158,
-    "height": 168
+    "width": 138,
+    "height": 216
   },
   "2": {
-    "width": 151,
-    "height": 172
+    "width": 143,
+    "height": 214
   },
   "3": {
-    "width": 166,
-    "height": 181
+    "width": 129,
+    "height": 191
   },
   "4": {
-    "width": 159,
-    "height": 170
-  },
-  "5": {
-    "width": 162,
-    "height": 181
+    "width": 134,
+    "height": 195
   },
   "6": {
-    "width": 160,
-    "height": 165
+    "width": 136,
+    "height": 195
   },
   "7": {
-    "width": 153,
-    "height": 188
+    "width": 176,
+    "height": 173
   },
   "8": {
-    "width": 154,
+    "width": 110,
     "height": 185
-  },
-  "9": {
-    "width": 159,
-    "height": 187
-  },
-  "10": {
-    "width": 154,
-    "height": 188
-  },
-  "11": {
-    "width": 157,
-    "height": 189
-  },
-  "12": {
-    "width": 148,
-    "height": 186
-  },
-  "13": {
-    "width": 156,
-    "height": 185
-  },
-  "14": {
-    "width": 160,
-    "height": 189
   }
 }

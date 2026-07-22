@@ -1,6 +1,7 @@
-export const ITEM_ID_COUNT = 15;
+/** Hippy pack: 8 tile arts (files 0-4, 6-8). Skip stale 5.png and unused 9.png. */
+export const ITEM_ID_GROUPS: string[] = ['0', '1', '2', '3', '4', '6', '7', '8'];
 
-export const ITEM_ID_GROUPS: string[] = Array.from({ length: ITEM_ID_COUNT }, (_, index) => `${index}`);
+export const ITEM_ID_COUNT = ITEM_ID_GROUPS.length;
 
 const LEGACY_ITEM_NAMES = [
     'cushion',
@@ -24,7 +25,7 @@ const LEGACY_ITEM_NAMES = [
 ];
 
 export const LEGACY_ITEM_ID_MAP: Record<string, string> = LEGACY_ITEM_NAMES.reduce((map, name, index) => {
-    map[name] = `${index % ITEM_ID_COUNT}`;
+    map[name] = ITEM_ID_GROUPS[index % ITEM_ID_COUNT];
     return map;
 }, {} as Record<string, string>);
 
@@ -36,7 +37,5 @@ export function normalizeItemId(value: string): string {
 }
 
 export function isCanonicalItemId(value: string): boolean {
-    if (!/^\d+$/.test(value)) return false;
-    const id = Number(value);
-    return Number.isInteger(id) && id >= 0 && id < ITEM_ID_COUNT;
+    return ITEM_ID_GROUPS.includes(value);
 }

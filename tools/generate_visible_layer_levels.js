@@ -9,7 +9,15 @@ const TILE_W = Number(process.env.TILE_W ?? 120);
 const TILE_H = Number(process.env.TILE_H ?? 144);
 const JITTER_X = 0.5;
 const JITTER_Y = 0.6;
-const GROUPS = Array.from({ length: 15 }, (_, i) => String(i));
+// Hippy: 8 tile arts (files 0-4, 6-8). Skip stale 5.png and unused 9.png.
+const GROUPS = ['0', '1', '2', '3', '4', '6', '7', '8'];
+const STARTING_BOOSTERS = [
+  { HINT: 3, UNDO: 3, SKIP: 0 },
+  { HINT: 2, UNDO: 3, SKIP: 0 },
+  { HINT: 3, UNDO: 2, SKIP: 0 },
+  { HINT: 2, UNDO: 2, SKIP: 0 },
+  { HINT: 3, UNDO: 3, SKIP: 0 },
+];
 const TILE_SIZE_CATALOG_PATH = process.env.TILE_SIZE_CATALOG ?? path.join('assets', 'resources', 'data', 'tile_size_catalog.json');
 const TILE_SIZE_CATALOG = fs.existsSync(TILE_SIZE_CATALOG_PATH)
   ? JSON.parse(fs.readFileSync(TILE_SIZE_CATALOG_PATH, 'utf8').replace(/^\uFEFF/, ''))
@@ -18,8 +26,9 @@ const CATALOG_SIZES = Object.values(TILE_SIZE_CATALOG)
   .filter(size => Number.isFinite(size?.width) && size.width > 0 && Number.isFinite(size?.height) && size.height > 0);
 const MAX_TILE_W = CATALOG_SIZES.length ? Math.max(...CATALOG_SIZES.map(size => size.width)) : TILE_W;
 const MAX_TILE_H = CATALOG_SIZES.length ? Math.max(...CATALOG_SIZES.map(size => size.height)) : TILE_H;
-const SAME_LAYER_GAP_X = 8;
-const SAME_LAYER_GAP_Y = 8;
+// Keep a real gap even on dense early boards — Hippy tiles are tall/wide and vary a lot.
+const SAME_LAYER_GAP_X = 12;
+const SAME_LAYER_GAP_Y = 12;
 const COVER_THRESHOLD = 0;
 const FINAL_COVER_THRESHOLD = 0.08;
 const STACK_MIN_COVER_RATIO = 0.2;
@@ -84,11 +93,12 @@ const ACTIVE_SHAPES = MAX_TILE_W >= 180 || MAX_TILE_H >= 216
   ? SHAPES.filter(([, rows]) => rows.length <= 4 && rows[0].length <= 4)
   : SHAPES;
 
+// Compact early silhouettes for tall Hippy tiles (keep same tile/layer difficulty targets).
 const EARLY_PRESET_SHAPES = [
-  ['triangle_stairs', ['#....', '##...', '###..', '####.', '#####'], 'default_depths'],
-  ['double_parallel_clusters', ['##.##', '##.##', '.....', '##.##', '##.##'], 'default_depths'],
+  ['petal_rise', ['#...', '##..', '###.', '####'], 'default_depths'],
+  ['twin_lanes', ['##.#', '##.#', '#.##', '#.##'], 'default_depths'],
   ['topdown_pyramid', ['####', '####', '####', '####'], 'topdown_pyramid'],
-  ['plus_mark', ['..#..', '..#..', '#####', '..#..', '..#..'], 'default_depths'],
+  ['cross_gem', ['.##.', '####', '.##.'], 'default_depths'],
   ['hollow_square', ['####', '#..#', '#..#', '####'], 'default_depths'],
 ];
 
@@ -125,6 +135,52 @@ function applyTileSizes(tiles) {
     const size = catalogSize(tile.groupId);
     tile.tileWidth = size.width;
     tile.tileHeight = size.height;
+  }
+}
+
+function countSameLayerOverlaps(tiles, config) {
+  let count = 0;
+  for (let i = 0; i < tiles.length; i++) {
+    for (let j = i + 1; j < tiles.length; j++) {
+      if (sameLayerOverlap(tiles[i], tiles[j], config)) count++;
+    }
+  }
+  return count;
+}
+
+/**
+ * Sync board tile size to catalog max and grow spacing until same-layer AABBs no longer collide.
+ * Prevents Hippy size drift (catalog taller/wider than spacing baked for older packs).
+ */
+function ensureCatalogAwareSpacing(config, tiles) {
+  if (!tiles.length) return;
+  const maxW = Math.max(...tiles.map(t => tileW(t, config)));
+  const maxH = Math.max(...tiles.map(t => tileH(t, config)));
+  config.tileWidth = maxW;
+  config.tileHeight = maxH;
+
+  const fitSpacingX = Math.floor((SAFE.maxX - SAFE.minX - maxW) / Math.max(1, config.cols - 1));
+  const fitSpacingY = Math.floor((SAFE.maxY - SAFE.minY - maxH) / Math.max(1, config.rows - 1));
+  config.tileSpacing = Math.max(config.tileSpacing || 0, maxW + SAME_LAYER_GAP_X);
+  config.tileSpacingY = Math.max(config.tileSpacingY || 0, maxH + SAME_LAYER_GAP_Y);
+
+  for (let step = 0; step < 40; step++) {
+    recenter(config, tiles);
+    if (countSameLayerOverlaps(tiles, config) === 0 && fits(bounds(tiles, config))) break;
+    if (config.tileSpacing < fitSpacingX) config.tileSpacing += 2;
+    if (config.tileSpacingY < fitSpacingY) config.tileSpacingY += 2;
+    if (config.tileSpacing >= fitSpacingX && config.tileSpacingY >= fitSpacingY) {
+      recenter(config, tiles);
+      break;
+    }
+  }
+
+  recenter(config, tiles);
+  if (countSameLayerOverlaps(tiles, config) > 0) {
+    throw new Error(`same-layer overlap remains after spacing expand (${config.shapeName})`);
+  }
+  if (!fits(bounds(tiles, config))) {
+    throw new Error(`screen fit failed after spacing expand (${config.shapeName})`);
   }
 }
 
@@ -956,10 +1012,10 @@ function makeLevel(shapeIdx, difficultyIdx = shapeIdx) {
 
   const cols = shapeRows[0].length;
   const rows = shapeRows.length;
-  const minSameLayerGapX = cols >= 5 ? 0 : SAME_LAYER_GAP_X;
-  const minSameLayerGapY = rows >= 5 ? 0 : SAME_LAYER_GAP_Y;
-  const maxSameLayerGapX = cols >= 5 ? 0 : 18;
-  const maxSameLayerGapY = rows >= 5 ? 0 : 18;
+  const minSameLayerGapX = SAME_LAYER_GAP_X;
+  const minSameLayerGapY = SAME_LAYER_GAP_Y;
+  const maxSameLayerGapX = 24;
+  const maxSameLayerGapY = 24;
   const board = {
     rows,
     cols,
@@ -984,7 +1040,7 @@ function makeLevel(shapeIdx, difficultyIdx = shapeIdx) {
   recenter(board, tiles);
 
   const sequence = solutionOrder(tiles, board, idx);
-  const groupSpan = Math.min(GROUPS.length, idx < 10 ? 12 : idx < 24 ? 14 : idx < 38 ? 16 : 18);
+  const groupSpan = GROUPS.length;
   const assignedGroups = [];
   const orderPermutation = buildOrderPermutation(sequence.length, idx);
   for (let p = 0; p < orderPermutation.length; p++) {
@@ -1020,19 +1076,25 @@ function makeLevel(shapeIdx, difficultyIdx = shapeIdx) {
   addDecoys(tiles, sequence, idx, board);
   addOpeningAmbiguity(tiles, sequence, idx, board);
   applyTileSizes(tiles);
+  ensureCatalogAwareSpacing(board, tiles);
 
   const solutionMoveTileIds = sequence.map(t => t.id);
   const { orders, solutionOrders } = buildOrdersFromTapSequence(sequence, idx);
   compactEarlyPresetLayerOverlap(difficultyIdx, board, tiles);
+  ensureCatalogAwareSpacing(board, tiles);
   applyFinalCoverThreshold(difficultyIdx, board);
   convertToLowerOnTop(board, tiles);
+  ensureCatalogAwareSpacing(board, tiles);
   computeBlockStatus(tiles, board);
 
+  const boosterPreset = STARTING_BOOSTERS[Math.min(idx, STARTING_BOOSTERS.length - 1)]
+    || { HINT: 3, UNDO: 3, SKIP: 0 };
   const level = {
     levelId,
     displayName: `Level ${pad(levelId)} - ${shapeName}`,
     defaultSkin: 'uma',
     gameMode: 'ORDER_MATCH',
+    startingBoosters: { ...boosterPreset },
     board,
     tray: { maxSlots: 7, matchCount: 3, screenPosition: { x: 540, y: 200 }, slotSpacing: 110 },
     orderConfig: { orderSize: 3, orderMode: 'EXACT_ORDER', wrongTrayMaxSlots: 1, consumeWrongTile: true },
