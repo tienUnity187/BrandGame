@@ -209,10 +209,10 @@ export class LeadCaptureService {
         const provinceOptions = PROVINCES.map(province => `<option value="${province}"></option>`).join('');
         const isSubmitMode = mode === 'submit';
         const title = isSubmitMode
-            ? 'XÁC NHẬN THÔNG TIN NHẬN QUÀ'
+            ? 'CHÚC MỪNG BẠN ĐÃ THU THẬP ĐỦ CÁC VẬT PHẨM!'
             : 'THÔNG TIN NHẬN QUÀ';
         const intro = isSubmitMode
-            ? 'Bạn đã hoàn thành trò chơi. Vui lòng kiểm tra hoặc cập nhật thông tin trước khi gửi kết quả.'
+            ? 'SGFood x Guess the Brands xin gửi tặng bạn Voucher giảm tối đa 100K vì đã trở thành 1 trong những người chơi hoàn thành xuất sắc trò chơi.<br>Xin vui lòng để lại thông tin để nhận quà:'
             : 'Vui lòng để lại thông tin trước khi bắt đầu. Thông tin sẽ được lưu trên thiết bị này và chưa gửi lên hệ thống.';
         const buttonText = isSubmitMode ? 'Xác nhận / Submit' : 'Lưu thông tin';
 
