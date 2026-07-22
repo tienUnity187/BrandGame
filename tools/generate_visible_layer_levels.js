@@ -9,8 +9,8 @@ const TILE_W = Number(process.env.TILE_W ?? 120);
 const TILE_H = Number(process.env.TILE_H ?? 144);
 const JITTER_X = 0.5;
 const JITTER_Y = 0.6;
-// Hippy: 8 tile arts (files 0-4, 6-8). Skip stale 5.png and unused 9.png.
-const GROUPS = ['0', '1', '2', '3', '4', '6', '7', '8'];
+// MHTK: 12 tile arts (files 0-11).
+const GROUPS = Array.from({ length: 12 }, (_, i) => String(i));
 const STARTING_BOOSTERS = [
   { HINT: 3, UNDO: 3, SKIP: 0 },
   { HINT: 2, UNDO: 3, SKIP: 0 },
@@ -26,7 +26,7 @@ const CATALOG_SIZES = Object.values(TILE_SIZE_CATALOG)
   .filter(size => Number.isFinite(size?.width) && size.width > 0 && Number.isFinite(size?.height) && size.height > 0);
 const MAX_TILE_W = CATALOG_SIZES.length ? Math.max(...CATALOG_SIZES.map(size => size.width)) : TILE_W;
 const MAX_TILE_H = CATALOG_SIZES.length ? Math.max(...CATALOG_SIZES.map(size => size.height)) : TILE_H;
-// Keep a real gap even on dense early boards — Hippy tiles are tall/wide and vary a lot.
+// Keep a real gap even on dense early boards — tile sizes vary a lot across packs.
 const SAME_LAYER_GAP_X = 12;
 const SAME_LAYER_GAP_Y = 12;
 const COVER_THRESHOLD = 0;
@@ -93,7 +93,7 @@ const ACTIVE_SHAPES = MAX_TILE_W >= 180 || MAX_TILE_H >= 216
   ? SHAPES.filter(([, rows]) => rows.length <= 4 && rows[0].length <= 4)
   : SHAPES;
 
-// Compact early silhouettes for tall Hippy tiles (keep same tile/layer difficulty targets).
+// Compact early silhouettes sized for variable tile packs (keep same tile/layer difficulty targets).
 const EARLY_PRESET_SHAPES = [
   ['petal_rise', ['#...', '##..', '###.', '####'], 'default_depths'],
   ['twin_lanes', ['##.#', '##.#', '#.##', '#.##'], 'default_depths'],
@@ -617,6 +617,55 @@ function wouldCreateBadOrder(sequence, rank, tile, newGroupId) {
   return current === prev || (next.length > 0 && current === next);
 }
 
+/** Guarantee every catalog group appears at least once when the level has enough tiles. */
+function ensureSequenceUsesAllGroups(sequence, idx) {
+  if (sequence.length < GROUPS.length) {
+    throw new Error(`level needs >= ${GROUPS.length} tiles to use all groups (has ${sequence.length})`);
+  }
+
+  const rank = new Map(sequence.map((t, i) => [t.id, i]));
+  const used = new Set(sequence.map(t => t.groupId));
+  const missing = GROUPS.filter(g => !used.has(g));
+  if (missing.length === 0) return;
+
+  const counts = new Map();
+  for (const tile of sequence) {
+    counts.set(tile.groupId, (counts.get(tile.groupId) || 0) + 1);
+  }
+
+  for (const groupId of missing) {
+    const donors = sequence
+      .filter(t => (counts.get(t.groupId) || 0) > 1)
+      .sort((a, b) => (counts.get(b.groupId) - counts.get(a.groupId)) || rank.get(b.id) - rank.get(a.id));
+
+    let assigned = false;
+    for (const donor of donors) {
+      if (wouldCreateBadOrder(sequence, rank, donor, groupId)) continue;
+      const old = donor.groupId;
+      donor.groupId = groupId;
+      counts.set(old, counts.get(old) - 1);
+      counts.set(groupId, (counts.get(groupId) || 0) + 1);
+      assigned = true;
+      break;
+    }
+    if (!assigned) {
+      // Last resort: force onto the most duplicated donor.
+      const donor = donors[0];
+      if (!donor) throw new Error(`cannot place missing group ${groupId} on level seed ${idx}`);
+      const old = donor.groupId;
+      donor.groupId = groupId;
+      counts.set(old, counts.get(old) - 1);
+      counts.set(groupId, (counts.get(groupId) || 0) + 1);
+    }
+  }
+
+  const finalUsed = new Set(sequence.map(t => t.groupId));
+  const stillMissing = GROUPS.filter(g => !finalUsed.has(g));
+  if (stillMissing.length) {
+    throw new Error(`failed to place all groups, missing: ${stillMissing.join(',')}`);
+  }
+}
+
 function addDecoys(tiles, sequence, idx, board) {
   const byId = new Map(tiles.map(t => [t.id, t]));
   const rank = new Map(sequence.map((t, i) => [t.id, i]));
@@ -1073,6 +1122,7 @@ function makeLevel(shapeIdx, difficultyIdx = shapeIdx) {
     assignedGroups[p] = gid;
     sequence[s].groupId = GROUPS[gid];
   }
+  ensureSequenceUsesAllGroups(sequence, idx);
   addDecoys(tiles, sequence, idx, board);
   addOpeningAmbiguity(tiles, sequence, idx, board);
   applyTileSizes(tiles);
@@ -1108,6 +1158,11 @@ function makeLevel(shapeIdx, difficultyIdx = shapeIdx) {
 
   const result = validate(level);
   if (result.errors.length) throw new Error(`level ${levelId} invalid:\n${result.errors.join('\n')}`);
+  const usedGroups = new Set(level.tiles.map(t => t.groupId));
+  const missingGroups = GROUPS.filter(g => !usedGroups.has(g));
+  if (missingGroups.length) {
+    throw new Error(`level ${levelId} missing groups: ${missingGroups.join(',')}`);
+  }
   const choices = choiceMetrics(level);
   const branch = branchDifficultyMetrics(level);
   const stagger = staggeredOrderMetrics(level);

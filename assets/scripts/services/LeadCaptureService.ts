@@ -1,3 +1,4 @@
+import { EDITOR, PREVIEW } from 'cc/env';
 import { GAME_NAME } from '../core/GameBrandConfig';
 
 export type Gender = 'male' | 'female' | 'secret';
@@ -12,6 +13,19 @@ export interface LeadCaptureData {
     birth_year: number;
     province: string;
 }
+
+/** Dummy data cho cheat auto-fill form (Editor/Preview only). */
+const EDITOR_CHEAT_LEAD_INFO: LeadCaptureData = {
+    full_name: 'Test Editor User',
+    phone: '0901234567',
+    gender: 'male',
+    contact_channel: 'zalo',
+    email: '',
+    birth_year: 1995,
+    province: 'Hồ Chí Minh',
+};
+
+const EDITOR_CHEAT_KEY = 'f';
 
 interface SubmitPayload extends LeadCaptureData {
     secret_key: string;
@@ -97,6 +111,7 @@ export class LeadCaptureService {
     private _activeRoot: HTMLDivElement | null = null;
     private _stylesInjected = false;
     private _disabledGamePointerTargets: Array<{ element: HTMLElement; pointerEvents: string }> = [];
+    private _editorCheatKeyHandler: ((event: KeyboardEvent) => void) | null = null;
 
     public static getInstance(): LeadCaptureService {
         if (!LeadCaptureService._instance) {
@@ -107,6 +122,10 @@ export class LeadCaptureService {
 
     public isSupported(): boolean {
         return typeof document !== 'undefined' && typeof window !== 'undefined' && typeof fetch !== 'undefined';
+    }
+
+    private isEditorCheatEnabled(): boolean {
+        return EDITOR || PREVIEW;
     }
 
     public showInitialInfoForm(options: LeadInfoFormOptions): Promise<boolean> {
@@ -160,6 +179,8 @@ export class LeadCaptureService {
                 this.destroyActiveRoot();
                 resolve(true);
             });
+
+            this.bindEditorAutoFillCheat(root, form, updateEmailVisibility);
 
             form?.addEventListener('submit', async event => {
                 event.preventDefault();
@@ -266,6 +287,9 @@ export class LeadCaptureService {
 
                     <div data-status class="sg-lead-status"></div>
                     <button type="submit" data-submit>${buttonText}</button>
+                    ${this.isEditorCheatEnabled()
+                        ? '<button type="button" class="sg-lead-cheat" data-editor-cheat>[Editor] Auto fill &amp; submit (F)</button>'
+                        : ''}
                 </form>
                 <div class="sg-lead-thanks" data-thanks>
                     <h2>Cảm ơn bạn!</h2>
@@ -284,6 +308,55 @@ export class LeadCaptureService {
         this.setInputValue(form, 'province', info.province);
         this.setCheckedValue(form, 'gender', info.gender);
         this.setCheckedValue(form, 'contact_channel', info.contact_channel);
+    }
+
+    /** Editor/Preview only: nút + phím F tự điền form rồi submit. */
+    private bindEditorAutoFillCheat(
+        root: HTMLDivElement,
+        form: HTMLFormElement | null,
+        onChannelChanged: () => void,
+    ): void {
+        if (!this.isEditorCheatEnabled() || !form) return;
+
+        const runCheat = () => {
+            if (!form || !form.isConnected) return;
+            this.fillForm(form, EDITOR_CHEAT_LEAD_INFO);
+            onChannelChanged();
+            console.log(`${LEAD_CAPTURE_LOG_PREFIX} Editor cheat: auto fill & submit`, EDITOR_CHEAT_LEAD_INFO);
+            if (typeof form.requestSubmit === 'function') {
+                form.requestSubmit();
+            } else {
+                form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+            }
+        };
+
+        const cheatButton = root.querySelector<HTMLButtonElement>('[data-editor-cheat]');
+        cheatButton?.addEventListener('click', event => {
+            event.preventDefault();
+            runCheat();
+        });
+
+        this.unbindEditorCheatKey();
+        this._editorCheatKeyHandler = (event: KeyboardEvent) => {
+            if (event.repeat) return;
+            if (!this._activeRoot || !this._activeRoot.isConnected) return;
+
+            const key = (event.key || '').toLowerCase();
+            const isF = key === EDITOR_CHEAT_KEY || event.code === 'KeyF' || event.keyCode === 70;
+            if (!isF) return;
+
+            event.preventDefault();
+            event.stopPropagation();
+            runCheat();
+        };
+        // Capture phase: nhận phím trước khi overlay stopPropagation, kể cả khi focus đang ở input.
+        window.addEventListener('keydown', this._editorCheatKeyHandler, true);
+    }
+
+    private unbindEditorCheatKey(): void {
+        if (!this._editorCheatKeyHandler) return;
+        window.removeEventListener('keydown', this._editorCheatKeyHandler, true);
+        this._editorCheatKeyHandler = null;
     }
 
     private buildLeadInfo(form: HTMLFormElement): { info?: LeadCaptureData; error?: string } {
@@ -462,6 +535,7 @@ export class LeadCaptureService {
     }
 
     private destroyActiveRoot(): void {
+        this.unbindEditorCheatKey();
         if (this._activeRoot && this._activeRoot.parentElement) {
             this._activeRoot.parentElement.removeChild(this._activeRoot);
         }
@@ -623,6 +697,12 @@ export class LeadCaptureService {
                 cursor: pointer;
                 pointer-events: auto;
                 touch-action: manipulation;
+            }
+            .sg-lead-card button.sg-lead-cheat {
+                margin-top: 8px;
+                background: #5b6670;
+                font-size: 13px;
+                font-weight: 600;
             }
             .sg-lead-card button:disabled {
                 cursor: wait;

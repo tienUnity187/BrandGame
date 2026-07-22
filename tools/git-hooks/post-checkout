@@ -1,0 +1,8 @@
+#!/bin/sh
+# After git checkout / branch switch, sync web <title> from GameBrandConfig.ts
+# Install once (from repo root):
+#   git config core.hooksPath tools/git-hooks
+
+if [ -f "tools/sync-brand-title.js" ]; then
+  node tools/sync-brand-title.js
+fi
