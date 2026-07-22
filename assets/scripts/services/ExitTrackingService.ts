@@ -1,4 +1,5 @@
 import { GAME_NAME } from '../core/GameBrandConfig';
+import { SaveManager } from '../core/SaveManager';
 
 interface ExitTrackingOptions {
     getSessionId: () => string;
@@ -10,6 +11,8 @@ interface ExitTrackingPayload {
     session_id: string;
     level_game: number;
     game_name: string;
+    full_name: string;
+    phone: string;
 }
 
 const EXIT_TRACKING_ENDPOINT = 'https://script.google.com/macros/s/AKfycbx7gaC7d-UrZIVF8zZ8Vxe-ToFhiGQX5vd5Z_7fgpL9ESaW3LhrcED986lYWJN-rSr3Ug/exec';
@@ -75,12 +78,15 @@ export class ExitTrackingService {
         if (this._hasSentExit) return;
         if (!this._getSessionId) return;
 
+        const leadInfo = SaveManager.getInstance().getLeadInfo();
         const payload: ExitTrackingPayload = {
             secret_key: SECRET_KEY,
             action: 'track_exit',
             session_id: this._getSessionId(),
             level_game: this._currentLevel,
             game_name: GAME_NAME,
+            full_name: leadInfo?.full_name || '',
+            phone: leadInfo?.phone || '',
         };
         const blob = new Blob([JSON.stringify(payload)], { type: BEACON_CONTENT_TYPE });
         const queued = navigator.sendBeacon(EXIT_TRACKING_ENDPOINT, blob);
