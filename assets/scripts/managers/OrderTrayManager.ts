@@ -379,21 +379,9 @@ export class OrderTrayManager extends Component {
 
     private setPreviewColor(previewNode: Node | null, color: Color): void {
         if (!previewNode || !previewNode.isValid) return;
-        const safeColor = this.cloneColorOrWhite(color);
-
-        const sprite = previewNode.getComponent(Sprite);
+        const sprite = this.getNodeSprite(previewNode);
         if (sprite) {
-            sprite.color = safeColor;
-            return;
-        }
-
-        // Nếu node chính không có Sprite, tìm trong children
-        for (const child of previewNode.children) {
-            const childSprite = child.getComponent(Sprite);
-            if (childSprite) {
-                childSprite.color = safeColor;
-                return;
-            }
+            sprite.color = this.cloneColorOrWhite(color);
         }
     }
 
@@ -771,14 +759,18 @@ export class OrderTrayManager extends Component {
         return null;
     }
 
-    private getNodeSprite(node: Node): Sprite | null {
+    private getNodeSprite(node: Node | null): Sprite | null {
+        if (!node || !node.isValid) return null;
+
+        // Prefab tile_default: Sprite nằm ở child "visual"
+        const visualNode = node.getChildByName('visual');
+        const visualSprite = visualNode?.getComponent(Sprite);
+        if (visualSprite) return visualSprite;
+
         const sprite = node.getComponent(Sprite);
         if (sprite) return sprite;
-        for (const child of node.children) {
-            const childSprite = child.getComponent(Sprite);
-            if (childSprite) return childSprite;
-        }
-        return null;
+
+        return node.getComponentInChildren(Sprite);
     }
 
     private tweenColor(sprite: Sprite, from: Color, to: Color, duration: number): void {
@@ -919,6 +911,11 @@ export class OrderTrayManager extends Component {
             visualNode.setScale(1, 1, 1);
             const visualOpacity = visualNode.getComponent(UIOpacity);
             if (visualOpacity) visualOpacity.opacity = 255;
+        }
+
+        const sprite = this.getNodeSprite(node);
+        if (sprite) {
+            sprite.color = Color.WHITE;
         }
     }
 
