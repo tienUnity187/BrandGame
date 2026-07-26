@@ -10,18 +10,15 @@ import { UIManager } from './UIManager';
 import { AudioManager } from './AudioManager';
 import { SkinManager } from './SkinManager';
 import { SaveManager } from '../core/SaveManager';
-import type { SavedLeadInfo } from '../core/SaveManager';
 import { OrderTrayManager } from './OrderTrayManager';
 import { WrongTrayManager } from './WrongTrayManager';
 import { BoosterManager } from './BoosterManager';
-import { LeadCaptureService } from '../services/LeadCaptureService';
-import { ExitTrackingService } from '../services/ExitTrackingService';
 import { GAME_NAME } from '../core/GameBrandConfig';
+import { TeviLoginManager } from '../TeviLoginManager';
 
 const { ccclass, property } = _decorator;
-const WIN_GAME_CHEAT_KEY_CODE = 87; // W
 const WIN_LEVEL_5_CHEAT_KEY_CODE = 84; // T
-const FINAL_FORM_LEVEL_ID = 5;
+const LEVEL_5_ID = 5;
 
 /**
  * GameManager - Entry point controller, quản lý vòng đời game.
@@ -54,8 +51,6 @@ export class GameManager extends Component {
     private _initPromise: Promise<void> | null = null;
     private _isInitialized: boolean = false;
     private _postInitHomeStarted: boolean = false;
-    private _currentSessionId: string = '';
-    private _forceShowLeadCaptureOnce: boolean = false;
 
     @property(EditBox)
     public levelJumpInput: EditBox | null = null;
@@ -85,10 +80,7 @@ export class GameManager extends Component {
         }
         GameManager.Instance = this;
         director.addPersistRootNode(this.node);
-        this.ensureSessionId();
-        ExitTrackingService.getInstance().initialize({
-            getSessionId: () => this.getCurrentSessionId(),
-        });
+        this.ensureTeviLoginManager();
         this.applyWebDocumentTitle();
 
         // Lock web build to 1080x1920 aspect ratio, fit inside browser without stretching.
@@ -154,17 +146,12 @@ export class GameManager extends Component {
         this.bindHomeUI();
         this.startPlayButtonPulse();
         this.onInitializationReadyForHome();
-        await this.ensureInitialLeadInfo();
     }
 
     /** Phím cheat: 1-9 đổi level, R restart, N next level */
     private onKeyDown(event: EventKeyboard): void {
         if (!this.isEditorCheatEnabled()) return;
         const key = event.keyCode;
-        if (key === WIN_GAME_CHEAT_KEY_CODE) {
-            void this.runLevel5FormTestCheat();
-            return;
-        }
         if (key === WIN_LEVEL_5_CHEAT_KEY_CODE) {
             void this.runLevel5WinCheat();
             return;
@@ -194,26 +181,13 @@ export class GameManager extends Component {
         }
     }
 
-    private async runLevel5FormTestCheat(): Promise<void> {
-        if (this._transitionRunning) return;
-        this._forceShowLeadCaptureOnce = true;
-        if (this._currentState !== GameState.GAMEPLAY) {
-            await this.waitForInitialization();
-            await this.transitionToGame();
-        }
-        await this.startLevel(FINAL_FORM_LEVEL_ID);
-        setTimeout(() => {
-            LevelManager.getInstance().completeLevel(false);
-        }, 300);
-    }
-
     private async runLevel5WinCheat(): Promise<void> {
         if (this._transitionRunning) return;
         if (this._currentState !== GameState.GAMEPLAY) {
             await this.waitForInitialization();
             await this.transitionToGame();
         }
-        await this.startLevel(FINAL_FORM_LEVEL_ID);
+        await this.startLevel(LEVEL_5_ID);
         setTimeout(() => {
             LevelManager.getInstance().completeLevel(false);
         }, 300);
@@ -227,18 +201,7 @@ export class GameManager extends Component {
                 this.returnToMenu();
                 return;
             }
-
-            if ((levelId === FINAL_FORM_LEVEL_ID && !SaveManager.getInstance().hasSubmittedLeadCapture()) || this._forceShowLeadCaptureOnce) {
-                this._forceShowLeadCaptureOnce = false;
-                const submitted = await this.showLeadCaptureForm();
-                if (submitted) {
-                    SaveManager.getInstance().saveLeadCaptureSubmitted();
-                    SaveManager.getInstance().resetProgressToLevelOne();
-                    await this.returnToMenu();
-                }
-            }
         } catch (err) {
-            this._forceShowLeadCaptureOnce = false;
             this.returnToMenu();
         }
     }
@@ -343,7 +306,6 @@ export class GameManager extends Component {
     /** Bắt đầu level mới */
     public async startLevel(levelId: number, options?: { parallelTransition?: boolean }): Promise<void> {
         const startToken = ++this._startLevelToken;
-        ExitTrackingService.getInstance().setLevel(levelId);
         await this.waitForInitialization();
         await this.ensureHomeLevelPrepared(levelId);
         if (startToken !== this._startLevelToken) return;
@@ -512,8 +474,6 @@ export class GameManager extends Component {
 
     private async onPlayGameClicked(): Promise<void> {
         if (this._transitionRunning) return;
-        const hasLeadInfo = await this.ensureInitialLeadInfo();
-        if (!hasLeadInfo) return;
         const levelId = this.getSavedLevelId();
 
         await this.waitForInitialization();
@@ -614,52 +574,12 @@ export class GameManager extends Component {
         return this._elapsedSeconds;
     }
 
-    public getCurrentSessionId(): string {
-        this.ensureSessionId();
-        return this._currentSessionId;
-    }
-
-    private ensureSessionId(): string {
-        if (this._currentSessionId) return this._currentSessionId;
-        this._currentSessionId = this.createSessionId();
-        console.log('[GameSession] New session_id:', this._currentSessionId);
-        return this._currentSessionId;
-    }
-
-    private createSessionId(): string {
-        const cryptoObj = (globalThis as any).crypto;
-        if (cryptoObj && typeof cryptoObj.randomUUID === 'function') {
-            return cryptoObj.randomUUID();
+    /** Tự mount đăng nhập Tevi nếu Scene chưa gắn sẵn component này. */
+    private ensureTeviLoginManager(): void {
+        const existingManager = director.getScene()?.getComponentInChildren(TeviLoginManager);
+        if (!existingManager) {
+            this.node.addComponent(TeviLoginManager);
         }
-        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, char => {
-            const value = Math.random() * 16 | 0;
-            const next = char === 'x' ? value : (value & 0x3 | 0x8);
-            return next.toString(16);
-        });
-    }
-
-    private async showLeadCaptureForm(): Promise<boolean> {
-        const leadCapture = LeadCaptureService.getInstance();
-        if (!leadCapture.isSupported()) return false;
-
-        return leadCapture.showCompletionForm({
-            initialInfo: SaveManager.getInstance().getLeadInfo(),
-            onSave: info => SaveManager.getInstance().saveLeadInfo(info as SavedLeadInfo),
-            getSessionId: () => this.getCurrentSessionId(),
-        });
-    }
-
-    private async ensureInitialLeadInfo(): Promise<boolean> {
-        const saveManager = SaveManager.getInstance();
-        if (saveManager.hasLeadInfo()) return true;
-
-        const leadCapture = LeadCaptureService.getInstance();
-        if (!leadCapture.isSupported()) return true;
-
-        return leadCapture.showInitialInfoForm({
-            initialInfo: saveManager.getLeadInfo(),
-            onSave: info => saveManager.saveLeadInfo(info as SavedLeadInfo),
-        });
     }
 
     private ensureOpacity(node: Node): UIOpacity {
