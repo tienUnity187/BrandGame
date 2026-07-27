@@ -4,9 +4,10 @@
  */
 
 interface TeviLoadConfigOptions {
-    optionMenu: boolean | Record<string, unknown>;
-    config: Record<string, unknown>;
-    version: string;
+    optionMenu?: boolean | string[] | Record<string, unknown>;
+    config?: Record<string, unknown> | string[];
+    version?: string;
+    [key: string]: unknown;
 }
 
 interface TeviGetUserInfoOptions {
@@ -23,8 +24,10 @@ interface TeviUserInfo {
 
 interface TeviGetUserInfoResponse {
     error_code?: string | number;
+    error_message?: string;
     message?: string;
     userInfo?: TeviUserInfo;
+    data?: TeviUserInfo | { userInfo?: TeviUserInfo; [key: string]: unknown };
 
     // Một số phiên bản bridge có thể trả thông tin user ở cấp ngoài cùng.
     user_app_token?: string;
@@ -46,13 +49,17 @@ interface TeviExecuteLinkOptions {
 
 interface TeviBridgeResponse {
     error_code?: string | number;
+    error_message?: string;
     message?: string;
     call?: string;
     [key: string]: unknown;
 }
 
 interface TeviJSBridge {
-    loadConfig(options: TeviLoadConfigOptions): void;
+    loadConfig(
+        options: TeviLoadConfigOptions,
+        callback?: (response: TeviBridgeResponse) => void,
+    ): void;
     getUserInfo(
         options: TeviGetUserInfoOptions,
         callback: (response: TeviGetUserInfoResponse) => void,

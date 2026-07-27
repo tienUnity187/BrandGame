@@ -1,5 +1,5 @@
-/** Hippy pack: 8 tile arts (files 0-4, 6-8). Skip stale 5.png and unused 9.png. */
-export const ITEM_ID_GROUPS: string[] = ['0', '1', '2', '3', '4', '6', '7', '8'];
+/** VelvetNight / VevetNight pack: 22 tile arts (files 0-21). */
+export const ITEM_ID_GROUPS: string[] = Array.from({ length: 22 }, (_, index) => `${index}`);
 
 export const ITEM_ID_COUNT = ITEM_ID_GROUPS.length;
 

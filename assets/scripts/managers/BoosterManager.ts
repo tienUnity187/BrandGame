@@ -37,14 +37,17 @@ export class BoosterManager extends Component {
 
     private readonly _defaultHintCount = 1;
     private readonly _defaultUndoCount = 1;
-    private readonly _maxHintCount = 1;
-    private readonly _maxUndoCount = 1;
+    private readonly _maxHintCount = 99;
+    private readonly _maxUndoCount = 99;
     private readonly _maxSkipCount = 1;
     private readonly _skipBlockedLevelId = 5;
+    private readonly _testCheatBoosterCount = 99;
 
     private _hintCount: number = 1;
     private _undoCount: number = 1;
     private _skipCount: number = 0;
+    /** TODO: tắt sau khi test xong — tạm bật 99 HINT/UNDO. */
+    private _testBoosterCheatEnabled: boolean = true;
 
     
     private _undoStack: IGameStateSnapshot[] = [];
@@ -63,14 +66,18 @@ export class BoosterManager extends Component {
 
     public resetForLevel(): void {
         const startingBoosters = LevelManager.getInstance()?.getCurrentLevel()?.startingBoosters;
-        this._hintCount = Math.min(
-            this._maxHintCount,
-            this.getStartingBoosterCount(startingBoosters, 'HINT', this._defaultHintCount)
-        );
-        this._undoCount = Math.min(
-            this._maxUndoCount,
-            this.getStartingBoosterCount(startingBoosters, 'UNDO', this._defaultUndoCount)
-        );
+        this._hintCount = this._testBoosterCheatEnabled
+            ? this._testCheatBoosterCount
+            : Math.min(
+                this._maxHintCount,
+                this.getStartingBoosterCount(startingBoosters, 'HINT', this._defaultHintCount)
+            );
+        this._undoCount = this._testBoosterCheatEnabled
+            ? this._testCheatBoosterCount
+            : Math.min(
+                this._maxUndoCount,
+                this.getStartingBoosterCount(startingBoosters, 'UNDO', this._defaultUndoCount)
+            );
         this._skipCount = this.isSkipBlockedForCurrentLevel()
             ? 0
             : Math.min(this._maxSkipCount, SaveManager.getInstance().getSkipCount());
@@ -81,6 +88,27 @@ export class BoosterManager extends Component {
         this.clearUndoStack();
         this.clearHighlight();
         this.emitChanged();
+    }
+
+    /** Editor/Preview cheat: bật/tắt 99 HINT + 99 UNDO, giữ trạng thái khi đổi level. */
+    public toggleTestBoosterCheat(): boolean {
+        this._testBoosterCheatEnabled = !this._testBoosterCheatEnabled;
+        if (this._testBoosterCheatEnabled) {
+            this._hintCount = this._testCheatBoosterCount;
+            this._undoCount = this._testCheatBoosterCount;
+        } else {
+            const startingBoosters = LevelManager.getInstance()?.getCurrentLevel()?.startingBoosters;
+            this._hintCount = Math.min(
+                this._maxHintCount,
+                this.getStartingBoosterCount(startingBoosters, 'HINT', this._defaultHintCount)
+            );
+            this._undoCount = Math.min(
+                this._maxUndoCount,
+                this.getStartingBoosterCount(startingBoosters, 'UNDO', this._defaultUndoCount)
+            );
+        }
+        this.emitChanged();
+        return this._testBoosterCheatEnabled;
     }
 
     private getStartingBoosterCount(

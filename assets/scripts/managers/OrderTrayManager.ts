@@ -42,6 +42,9 @@ export class OrderTrayManager extends Component {
     @property
     public slotSpacing: number = 120;
 
+    @property({ tooltip: 'Độ lệch Y của các slot so với tâm khung order panel' })
+    public slotOffsetY: number = 0;
+
     @property
     public flyDuration: number = 0.3;
 
@@ -233,8 +236,8 @@ export class OrderTrayManager extends Component {
 
             for (let ii = 0; ii < itemCount; ii++) {
                 const pos = panel
-                    ? new Vec3(startX + ii * this.slotSpacing - centerX, 0, 0)
-                    : new Vec3(startX + ii * this.slotSpacing, orderY, 0);
+                    ? new Vec3(startX + ii * this.slotSpacing - centerX, this.slotOffsetY, 0)
+                    : new Vec3(startX + ii * this.slotSpacing, orderY + this.slotOffsetY, 0);
                 const slot = this.createSlot(slotIdx, oi, ii, pos, order.items[ii], panel);
                 this._slots.push(slot);
                 slotIdx++;
@@ -651,7 +654,7 @@ export class OrderTrayManager extends Component {
                 panel3.setScale(0, 0, 1);
                 this.setPanelOpacity(panel3, 0);
                 for (let ii = 0; ii < itemCount; ii++) {
-                    const pos = new Vec3(startX + ii * this.slotSpacing - centerX, 0, 0);
+                    const pos = new Vec3(startX + ii * this.slotSpacing - centerX, this.slotOffsetY, 0);
                     const slot = this.createSlot(this._slots.length, nextOrderIndex, ii, pos, order.items[ii], panel3);
                     this._slots.push(slot);
                 }

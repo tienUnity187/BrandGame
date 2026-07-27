@@ -9,15 +9,8 @@ const TILE_W = Number(process.env.TILE_W ?? 120);
 const TILE_H = Number(process.env.TILE_H ?? 144);
 const JITTER_X = 0.5;
 const JITTER_Y = 0.6;
-// Hippy: 8 tile arts (files 0-4, 6-8). Skip stale 5.png and unused 9.png.
-const GROUPS = ['0', '1', '2', '3', '4', '6', '7', '8'];
-const STARTING_BOOSTERS = [
-  { HINT: 3, UNDO: 3, SKIP: 0 },
-  { HINT: 2, UNDO: 3, SKIP: 0 },
-  { HINT: 3, UNDO: 2, SKIP: 0 },
-  { HINT: 2, UNDO: 2, SKIP: 0 },
-  { HINT: 3, UNDO: 3, SKIP: 0 },
-];
+// VelvetNight / VevetNight: 22 tile arts (files 0-21).
+const GROUPS = Array.from({ length: 22 }, (_, i) => String(i));
 const TILE_SIZE_CATALOG_PATH = process.env.TILE_SIZE_CATALOG ?? path.join('assets', 'resources', 'data', 'tile_size_catalog.json');
 const TILE_SIZE_CATALOG = fs.existsSync(TILE_SIZE_CATALOG_PATH)
   ? JSON.parse(fs.readFileSync(TILE_SIZE_CATALOG_PATH, 'utf8').replace(/^\uFEFF/, ''))
@@ -26,9 +19,32 @@ const CATALOG_SIZES = Object.values(TILE_SIZE_CATALOG)
   .filter(size => Number.isFinite(size?.width) && size.width > 0 && Number.isFinite(size?.height) && size.height > 0);
 const MAX_TILE_W = CATALOG_SIZES.length ? Math.max(...CATALOG_SIZES.map(size => size.width)) : TILE_W;
 const MAX_TILE_H = CATALOG_SIZES.length ? Math.max(...CATALOG_SIZES.map(size => size.height)) : TILE_H;
-// Keep a real gap even on dense early boards — Hippy tiles are tall/wide and vary a lot.
-const SAME_LAYER_GAP_X = 12;
-const SAME_LAYER_GAP_Y = 12;
+// Large ~200px tiles need a real same-layer gap and compact boards.
+const SAME_LAYER_GAP_X = 10;
+const SAME_LAYER_GAP_Y = 10;
+const LARGE_TILE_PACK = MAX_TILE_W >= 180 || MAX_TILE_H >= 190;
+
+function boostersFor(idx) {
+  if (idx < 5) {
+    return { HINT: 3, UNDO: 3, SKIP: 0 };
+  }
+
+  // Safety net scales with level length/traps, but remains scarce enough for monetization.
+  return {
+    HINT: Math.min(4, 2 + Math.floor(idx / 15)),
+    UNDO: Math.min(4, 2 + Math.floor(idx / 18)),
+    SKIP: 0,
+  };
+}
+
+function groupSpanFor(idx) {
+  // A wider pool in the tutorial prevents several selectable tiles from
+  // sharing the requested icon and removes accidental same-item traps.
+  if (idx < 5) return Math.min(GROUPS.length, 18);
+  if (idx < 12) return Math.min(GROUPS.length, 14);
+  if (idx < 22) return Math.min(GROUPS.length, 18);
+  return GROUPS.length;
+}
 const COVER_THRESHOLD = 0;
 const FINAL_COVER_THRESHOLD = 0.08;
 const STACK_MIN_COVER_RATIO = 0.2;
@@ -37,7 +53,13 @@ const BLOCK_OVERLAP_HEIGHT_RATIO = 0.07;
 const BLOCK_OVERLAP_AREA_RATIO = 0.02;
 const SAFE = { minX: -510, maxX: 510, minY: -600, maxY: 600 };
 
-const SHAPES = [
+// Compact silhouettes only (<=4x4) so ~200px VelvetNight tiles still fit the safe screen.
+const COMPACT_SHAPES = [
+  ['petal_rise', ['#...', '##..', '###.', '####']],
+  ['twin_lanes', ['##.#', '##.#', '#.##', '#.##']],
+  ['topdown_pyramid', ['####', '####', '####', '####'], 'topdown_pyramid'],
+  ['cross_gem', ['.##.', '####', '.##.']],
+  ['hollow_square', ['####', '#..#', '#..#', '####']],
   ['diamond_seed', ['.##.', '####', '#.##']],
   ['cross_gate', ['####', '.##.', '####']],
   ['mirror_frame', ['####', '#..#', '####']],
@@ -46,60 +68,59 @@ const SHAPES = [
   ['chevron_shield', ['.##.', '####', '.###', '..#.']],
   ['crown_step', ['#..#', '####', '####', '.##.']],
   ['lantern_core', ['.##.', '####', '#..#', '####']],
+  ['plus_small', ['.#.', '###', '.#.']],
+  ['stairs_3', ['#..', '##.', '###']],
+  ['corner_L', ['#..', '#..', '###']],
+  ['U_gate', ['#.#', '#.#', '###']],
+  ['H_gate', ['#.#', '###', '#.#']],
+  ['ring_3', ['###', '#.#', '###']],
+  ['slash_bar', ['##.', '.##', '##.']],
+  ['T_mark', ['###', '.#.', '.#.']],
+  ['Y_fork', ['#.#', '.#.', '###']],
+  ['pyramid_3', ['.#.', '###', '###']],
+  ['inv_pyramid', ['###', '###', '.#.']],
+  ['left_wedge', ['#..', '##.', '###', '##.']],
+  ['right_wedge', ['..#', '.##', '###', '.##']],
+  ['bridge_4', ['####', '.##.', '.##.', '####']],
+  ['pillars_4', ['#..#', '#..#', '####', '#..#']],
+  ['nest_4', ['.##.', '#..#', '#..#', '.##.']],
+  ['knot_alt', ['##.#', '.###', '###.', '#.##']],
+  ['seed_alt', ['#.##', '####', '##.#']],
+  ['gate_alt', ['.###', '##.#', '#.##', '###.']],
+  ['Z_mark', ['##.', '.##', '..#']],
+  ['S_mark', ['..#', '.##', '##.']],
+  ['C_hook', ['###', '#..', '###']],
+  ['E_ridge', ['###', '#.#', '#.#']],
+  ['dual_step', ['##..', '###.', '.###', '..##']],
+  ['fan_edge', ['#...', '##..', '###.', '##..']],
+  ['bowl_4', ['#..#', '####', '####', '.##.']],
+  ['twin_tower_lanes', ['##.#', '##.#', '#.##', '#.##']],
+  ['cross_wide', ['.##.', '####', '####', '.##.']],
+  ['mini_helm', ['####', '#..#', '.##.', '####']],
+  ['arrow_head', ['.#..', '##..', '###.', '####']],
+  ['trap_door', ['####', '.##.', '.##.', '####']],
+  ['split_bar', ['##.#', '####', '#.##', '####']],
+];
+const WIDE_SHAPES = [
   ['woven_star', ['.#.#.', '#####', '.###.', '#####']],
   ['totem_gate', ['#####', '..#..', '#.#.#', '#####']],
-  ['double_wave', ['##..#', '.####', '####.', '#..##']],
-  ['bowtie_gem', ['##.##', '.###.', '..#..', '.###.', '##.##']],
-  ['arrow_gem', ['..#..', '.###.', '#####', '.##..', '.##..']],
-  ['side_gate', ['###.#', '#.#.#', '###.#', '..###']],
-  ['oval_seal', ['..#..', '.###.', '#####', '.###.', '..##.']],
-  ['rune_bridge', ['#####', '.#.#.', '.###.', '.#.#.', '#####']],
   ['lotus_mark', ['.#.#.', '#####', '.###.', '##.##', '.###.']],
   ['spire_ring', ['..#..', '.###.', '##.##', '.###.', '##.##']],
-  ['split_crown', ['#.#.#', '#####', '.###.', '##.##', '#####']],
   ['solar_cross', ['.###.', '##..#', '#...#', '#..##', '#####']],
   ['moon_gate', ['.####', '##..#', '#...#', '##..#', '.####']],
-  ['twin_arrow', ['#...#', '##.##', '.###.', '##.##', '#...#']],
-  ['crystal_fan', ['..#..', '.###.', '#####', '##.##', '#...#']],
   ['helm_shape', ['#####', '#.#.#', '.###.', '#####', '##.##']],
-  ['temple_eye', ['#####', '#...#', '##.##', '#...#', '#####']],
-  ['spiral_step', ['####.', '#..#.', '#.###', '#...#', '#####']],
-  ['anchor_mark', ['..#..', '#####', '..#..', '#####', '.###.']],
-  ['comet_lane', ['###..', '.####', '..###', '####.', '##.##']],
-  ['butterfly', ['##.##', '#####', '.###.', '#####', '##.##']],
-  ['stacked_vase', ['.###.', '#####', '.#.#.', '.###.', '#####']],
-  ['orbit_frame', ['.####.', '######', '#.##.#', '######', '.####.']],
-  ['mask_shape', ['##.##.', '######', '#.##.#', '.####.', '##..##']],
-  ['trident_core', ['#.#.#.', '######', '..##..', '.####.', '######']],
-  ['leaf_diamond', ['..##..', '.####.', '######', '.####.', '##..##']],
-  ['trophy_gate', ['.####.', '######', '..##..', '.####.', '##..##']],
-  ['hourglass_crown', ['######', '.####.', '..##..', '.####.', '######']],
-  ['broken_ring', ['#####.', '#...#.', '#.###.', '#..##.', '.####.']],
-  ['wave_totem', ['##..##', '.####.', '####.#', '#..###', '.####.']],
-  ['star_forge', ['.#.##.', '######', '.####.', '######', '##.#..']],
-  ['shield_rune', ['.####.', '######', '#.##.#', '.####.', '..##..']],
-  ['circuit_gem', ['###.##', '#.##.#', '######', '#.##.#', '##.###']],
-  ['royal_gate', ['#.##.#', '######', '.####.', '#.##.#', '######']],
-  ['double_spire', ['#..#.#', '######', '..##..', '.####.', '##..##']],
-  ['lotus_shield', ['.####.', '######', '##.###', '.####.', '######']],
-  ['zigzag_crown', ['##..##', '.#####', '###.##', '#.####', '##..##']],
-  ['sunken_cross', ['######', '..##..', '######', '..##..', '######']],
-  ['compass_mark', ['..##..', '#.##.#', '######', '#.##.#', '..##..']],
-  ['mirror_lantern', ['.####.', '##..##', '######', '##..##', '.####.']],
-  ['master_emblem', ['#.##.#', '######', '.####.', '######', '#.##.#']],
-  ['final_totem', ['.####.', '######', '##.###', '.####.', '..##..']],
 ];
-const ACTIVE_SHAPES = MAX_TILE_W >= 180 || MAX_TILE_H >= 216
-  ? SHAPES.filter(([, rows]) => rows.length <= 4 && rows[0].length <= 4)
-  : SHAPES;
+const ACTIVE_SHAPES = LARGE_TILE_PACK ? COMPACT_SHAPES : [...COMPACT_SHAPES, ...WIDE_SHAPES];
 
-// Compact early silhouettes for tall Hippy tiles (keep same tile/layer difficulty targets).
 const EARLY_PRESET_SHAPES = [
   ['petal_rise', ['#...', '##..', '###.', '####'], 'default_depths'],
   ['twin_lanes', ['##.#', '##.#', '#.##', '#.##'], 'default_depths'],
   ['topdown_pyramid', ['####', '####', '####', '####'], 'topdown_pyramid'],
   ['cross_gem', ['.##.', '####', '.##.'], 'default_depths'],
   ['hollow_square', ['####', '#..#', '#..#', '####'], 'default_depths'],
+  ['stairs_3', ['#..', '##.', '###'], 'default_depths'],
+  ['plus_small', ['.#.', '###', '.#.'], 'default_depths'],
+  ['diamond_seed', ['.##.', '####', '#.##'], 'default_depths'],
 ];
 
 function pad(n) { return String(n).padStart(3, '0'); }
@@ -237,8 +258,18 @@ function componentCount(cells) {
   return count;
 }
 
-function targetTiles(idx) { return 18 + 3 * Math.floor(idx / 4); }
-function maxLayersFor(idx) { return idx < 4 ? 3 : idx < 12 ? 4 : 5; }
+function targetTiles(idx) {
+  const progressiveTarget = 18 + 3 * Math.floor(idx / 3);
+  // Four layers across a 12-cell late-game silhouette still provide 48 tiles,
+  // while leaving room for varied shapes instead of forcing one dense layout.
+  return Math.min(idx >= 29 ? 48 : 54, progressiveTarget);
+}
+function maxLayersFor(idx) {
+  if (idx < 6) return 3;
+  // Keep late boards readable without reducing their tile/trap difficulty.
+  if (idx >= 29) return 4;
+  return idx < 18 ? 4 : 5;
+}
 
 function layerJitter(layer, axis, config) {
   const seed = Math.abs(layer * 15485863 + axis * 32452843);
@@ -506,7 +537,9 @@ function computeBlockStatus(tiles, config) {
 function buildOrderPermutation(moveCount, idx) {
   const perm = [];
   let i = 0;
-  const shouldInterleave = idx >= 0;
+  // Levels 1-5 follow the natural selectable path so new players never need
+  // to pick a wrong "unlocker" tile between required order items.
+  const shouldInterleave = idx >= 5;
   while (i < moveCount) {
     if (shouldInterleave && i + 5 < moveCount) {
       perm.push(i, i + 2, i + 3, i + 1, i + 4, i + 5);
@@ -1009,6 +1042,9 @@ function makeLevel(shapeIdx, difficultyIdx = shapeIdx) {
       });
     }
   }
+  if (idx >= 29 && tiles.length < target) {
+    throw new Error(`shape ${shapeName} only fits ${tiles.length}/${target} tiles with 4 layers`);
+  }
 
   const cols = shapeRows[0].length;
   const rows = shapeRows.length;
@@ -1040,7 +1076,7 @@ function makeLevel(shapeIdx, difficultyIdx = shapeIdx) {
   recenter(board, tiles);
 
   const sequence = solutionOrder(tiles, board, idx);
-  const groupSpan = GROUPS.length;
+  const groupSpan = groupSpanFor(idx);
   const assignedGroups = [];
   const orderPermutation = buildOrderPermutation(sequence.length, idx);
   for (let p = 0; p < orderPermutation.length; p++) {
@@ -1087,17 +1123,20 @@ function makeLevel(shapeIdx, difficultyIdx = shapeIdx) {
   ensureCatalogAwareSpacing(board, tiles);
   computeBlockStatus(tiles, board);
 
-  const boosterPreset = STARTING_BOOSTERS[Math.min(idx, STARTING_BOOSTERS.length - 1)]
-    || { HINT: 3, UNDO: 3, SKIP: 0 };
   const level = {
     levelId,
     displayName: `Level ${pad(levelId)} - ${shapeName}`,
     defaultSkin: 'uma',
     gameMode: 'ORDER_MATCH',
-    startingBoosters: { ...boosterPreset },
+    startingBoosters: boostersFor(idx),
     board,
     tray: { maxSlots: 7, matchCount: 3, screenPosition: { x: 540, y: 200 }, slotSpacing: 110 },
-    orderConfig: { orderSize: 3, orderMode: 'EXACT_ORDER', wrongTrayMaxSlots: 1, consumeWrongTile: true },
+    orderConfig: {
+      orderSize: 3,
+      orderMode: 'EXACT_ORDER',
+      wrongTrayMaxSlots: idx < 5 ? 3 : 1,
+      consumeWrongTile: true,
+    },
     orders,
     solutionOrders,
     solutionMoveTileIds,
@@ -1180,7 +1219,7 @@ function progressiveScore(level) {
 }
 
 function difficultyBandForIndex(idx) {
-  return idx < 10 ? 'tutorial_plus' : idx < 22 ? 'easy_mid' : idx < 34 ? 'advanced' : idx < 44 ? 'expert' : 'master';
+  return idx < 10 ? 'tutorial_plus' : idx < 20 ? 'easy_mid' : idx < 32 ? 'advanced' : idx < 42 ? 'expert' : 'master';
 }
 
 function renumberLevel(level, idx) {
@@ -1193,6 +1232,7 @@ function renumberLevel(level, idx) {
 
   level.levelId = newLevelId;
   level.displayName = `Level ${pad(newLevelId)} - ${level.board.shapeName}`;
+  level.startingBoosters = boostersFor(difficultyIdx);
   for (let i = 0; i < level.tiles.length; i++) {
     const tile = level.tiles[i];
     tile.id = idMap.get(tile.id);
@@ -1215,20 +1255,28 @@ function renumberLevel(level, idx) {
 const signatures = new Set();
 const summary = [];
 const levels = [];
-const preserveGenerationOrder = process.env.PRESERVE_GENERATION_ORDER === '1' || START <= 20;
+// Keep handcrafted early order only for short tutorial packs; long packs sort by difficulty.
+const preserveGenerationOrder = process.env.PRESERVE_GENERATION_ORDER === '1'
+  || (process.env.PRESERVE_GENERATION_ORDER !== '0' && START <= 20 && COUNT > 0 && COUNT <= 8);
+const allowDuplicateShapes = LARGE_TILE_PACK || COUNT > ACTIVE_SHAPES.length + EARLY_PRESET_SHAPES.length;
 
 const desiredCount = COUNT > 0 ? COUNT : ACTIVE_SHAPES.length;
-for (let idx = 0; idx < desiredCount * 50 && levels.length < desiredCount; idx++) {
+for (let idx = 0; idx < desiredCount * 80 && levels.length < desiredCount; idx++) {
   let level;
   try {
     level = makeLevel(idx, DIFFICULTY_BASE + (preserveGenerationOrder ? levels.length : idx));
   } catch (err) {
-    if (process.env.DEBUG_GENERATOR === '1') throw err;
+    if (process.env.DEBUG_GENERATOR === '1') {
+      console.error(`[gen] skip/fail idx=${idx}:`, err.message || err);
+      if (!String(err.message || err).includes('same-layer') && !String(err.message || err).includes('screen fit') && !String(err.message || err).includes('invalid')) {
+        throw err;
+      }
+    }
     continue;
   }
   const sig = level.board.shapePattern.map(r => r.join('')).join('/');
-  if (signatures.has(sig) && TILE_W < 180 && TILE_H < 216) throw new Error(`duplicate shape at ${level.levelId}`);
-  signatures.add(sig);
+  if (signatures.has(sig) && !allowDuplicateShapes) continue;
+  if (!signatures.has(sig)) signatures.add(sig);
   level.difficultyMetrics.progressiveDifficultyScore = progressiveScore(level);
   levels.push(level);
 }
@@ -1267,3 +1315,13 @@ for (let idx = 0; idx < exportCount; idx++) {
     bounds: level.difficultyMetrics.screenBounds,
   });
 }
+
+console.log(JSON.stringify({
+  generated: exportCount,
+  uniqueShapes: signatures.size,
+  maxTile: { w: MAX_TILE_W, h: MAX_TILE_H },
+  groups: GROUPS.length,
+  first: summary.slice(0, 5),
+  mid: summary.slice(24, 26),
+  last: summary.slice(-3),
+}, null, 2));

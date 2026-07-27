@@ -22,7 +22,7 @@ import { BoosterManager } from './BoosterManager';
  * Load dữ liệu từ JSON và phân phát cho các gameplay manager.
  */
 export class LevelManager {
-    private static readonly PRELOAD_LEVEL_COUNT = 25;
+    private static readonly PRELOAD_LEVEL_COUNT = 50;
     private static readonly PRELOAD_SKIN_IDS = ['default', 'goc', 'saigonfood', 'uma'];
     private static _instance: LevelManager;
     private _currentLevel: ILevelData | null = null;

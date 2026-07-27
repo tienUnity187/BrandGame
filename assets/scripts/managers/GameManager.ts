@@ -15,10 +15,14 @@ import { WrongTrayManager } from './WrongTrayManager';
 import { BoosterManager } from './BoosterManager';
 import { GAME_NAME } from '../core/GameBrandConfig';
 import { TeviLoginManager } from '../TeviLoginManager';
+import { RewardVideoPlayer } from '../ui/RewardVideoPlayer';
 
 const { ccclass, property } = _decorator;
 const WIN_LEVEL_5_CHEAT_KEY_CODE = 84; // T
+const BOOSTER_CHEAT_KEY_CODE = 66; // B
 const LEVEL_5_ID = 5;
+/** Hook test nhanh: thắng level này sẽ mở video thưởng ngay. */
+const REWARD_VIDEO_TEST_LEVEL_ID = 1;
 
 /**
  * GameManager - Entry point controller, quản lý vòng đời game.
@@ -140,7 +144,7 @@ export class GameManager extends Component {
         EventBus.getInstance().on(GameEvent.LEVEL_COMPLETED, this.onLevelCompleted, this);
         EventBus.getInstance().on(GameEvent.LEVEL_FAILED, this.onLevelFailed, this);
 
-        // Cheat keys: 1-9 change level, R restart, N next level
+        // Editor cheats: 1-9 level, R restart, N next, T win L5, B booster cheat.
         input.on(Input.EventType.KEY_DOWN, this.onKeyDown, this);
         this.bindLevelJumpUI();
         this.bindHomeUI();
@@ -148,7 +152,7 @@ export class GameManager extends Component {
         this.onInitializationReadyForHome();
     }
 
-    /** Phím cheat: 1-9 đổi level, R restart, N next level */
+    /** Editor cheats: 1-9 đổi level, R restart, N next, T thắng L5, B bật booster. */
     private onKeyDown(event: EventKeyboard): void {
         if (!this.isEditorCheatEnabled()) return;
         const key = event.keyCode;
@@ -157,7 +161,10 @@ export class GameManager extends Component {
             return;
         }
         if (this._currentState !== GameState.GAMEPLAY) return;
-        if (key >= KeyCode.DIGIT_1 && key <= KeyCode.DIGIT_9) {
+        if (key === BOOSTER_CHEAT_KEY_CODE) {
+            const enabled = BoosterManager.getInstance()?.toggleTestBoosterCheat() ?? false;
+            console.log(`[Cheat] HINT/UNDO x99: ${enabled ? 'ON' : 'OFF'}`);
+        } else if (key >= KeyCode.DIGIT_1 && key <= KeyCode.DIGIT_9) {
             const levelId = key - KeyCode.DIGIT_1 + 1;
             this.startLevel(levelId);
         } else if (key === KeyCode.KEY_R) {
@@ -200,6 +207,17 @@ export class GameManager extends Component {
             if (!panel) {
                 this.returnToMenu();
                 return;
+            }
+
+            // Test nhanh: thắng Level 1 mở video thưởng ngay trên popup.
+            if (levelId === REWARD_VIDEO_TEST_LEVEL_ID) {
+                this.ensureRewardVideoPlayer();
+                TeviLoginManager.Instance?.setDebugStatus('Level 1 xong → bắt đầu xin video token...');
+                RewardVideoPlayer.Instance?.playSecretVideo(() => {
+                    // Chỉ chạy khi user xem xong/bấm X sau khi video đã PLAYING.
+                    TeviLoginManager.Instance?.setDebugStatus('Đã đóng video (xem xong/X), tiếp tục game.');
+                    console.log('[RewardVideo] Đã đóng video, tiếp tục game.');
+                });
             }
         } catch (err) {
             this.returnToMenu();
@@ -257,6 +275,7 @@ export class GameManager extends Component {
             'LevelSelectPanel',
         ]);
         this.ensureOrderManagers();
+        this.ensureRewardVideoPlayer();
 
         this.setState(GameState.MAIN_MENU);
     }
@@ -580,6 +599,25 @@ export class GameManager extends Component {
         if (!existingManager) {
             this.node.addComponent(TeviLoginManager);
         }
+    }
+
+    /** Tự tạo popup VideoPlayer thưởng nếu Scene chưa gắn sẵn. */
+    private ensureRewardVideoPlayer(): void {
+        const existing = RewardVideoPlayer.Instance
+            || director.getScene()?.getComponentInChildren(RewardVideoPlayer)
+            || null;
+        if (existing && existing.node?.isValid) {
+            RewardVideoPlayer.Instance = existing;
+            return;
+        }
+
+        const parent = this.uiRoot || this.node;
+        const rewardNode = new Node('RewardVideoPlayer');
+        rewardNode.layer = parent.layer;
+        rewardNode.addComponent(UITransform);
+        rewardNode.setParent(parent);
+        rewardNode.setPosition(0, 0, 0);
+        rewardNode.addComponent(RewardVideoPlayer);
     }
 
     private ensureOpacity(node: Node): UIOpacity {

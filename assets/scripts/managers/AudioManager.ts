@@ -122,6 +122,25 @@ export class AudioManager extends Component {
         if (!this._musicMuted) this._musicSource?.play();
     }
 
+    /** Tạm dừng toàn bộ âm thanh game (nhạc + SFX) khi mở overlay video. */
+    public pauseAllGameAudio(): void {
+        this.pauseMusic();
+        this._sfxSource?.stop();
+        const loopKeys = Array.from(this._activeLoopSfxKeys);
+        for (const key of loopKeys) {
+            this.stopLoopSfx(key);
+        }
+        const repeatingKeys = Array.from(this._repeatingSfxTimers.keys());
+        for (const key of repeatingKeys) {
+            this.stopRepeatingSfx(key);
+        }
+    }
+
+    /** Tiếp tục nhạc nền sau khi đóng overlay video. */
+    public resumeAllGameAudio(): void {
+        this.resumeMusic();
+    }
+
     public setMusicVolume(volume: number): void {
         this._musicVolume = Math.max(0, Math.min(1, volume));
         if (this._musicSource) this._musicSource.volume = this._musicVolume;
