@@ -4,7 +4,7 @@ import { GameManager } from '../managers/GameManager';
 import { AudioManager } from '../managers/AudioManager';
 
 const { ccclass, property } = _decorator;
-const FINAL_LEVEL_ID = 5;
+const FINAL_LEVEL_ID = 50;
 
 /**
  * LevelCompletePanel - Popup win.
@@ -28,7 +28,7 @@ export class LevelCompletePanel extends BasePanel {
 
     protected onShow(data?: any): void {
         super.onShow(data);
-        AudioManager.getInstance()?.playUi('panel_win');
+        AudioManager.getInstance()?.playUi('panel-win');
         this._data = data || {};
         this.updateUI();
         this.bindButtons();

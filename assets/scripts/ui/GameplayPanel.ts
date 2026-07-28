@@ -189,14 +189,14 @@ export class GameplayPanel extends BasePanel {
         this.releaseUndoButtonVisual();
         this.scheduleOnce(() => {
             const used = BoosterManager.getInstance()?.UseUndo() || false;
-            AudioManager.getInstance()?.playSfx(used ? 'tile_click' : 'button_click');
+            AudioManager.getInstance()?.playSfx(used ? 'tile_click' : 'button-click');
             this.updateBoosterUI();
         }, 0);
     }
 
     private onHintClicked(): void {
         const used = BoosterManager.getInstance()?.UseHint() || false;
-        AudioManager.getInstance()?.playSfx(used ? 'tile_click' : 'button_click');
+        AudioManager.getInstance()?.playSfx(used ? 'tile_click' : 'button-click');
         this.updateBoosterUI();
     }
 

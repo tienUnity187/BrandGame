@@ -21,8 +21,8 @@ const { ccclass, property } = _decorator;
 const WIN_LEVEL_5_CHEAT_KEY_CODE = 84; // T
 const BOOSTER_CHEAT_KEY_CODE = 66; // B
 const LEVEL_5_ID = 5;
-/** Hook test nhanh: thắng level này sẽ mở video thưởng ngay. */
-const REWARD_VIDEO_TEST_LEVEL_ID = 1;
+/** Mỗi mốc level bội số của giá trị này sẽ mở video thưởng. */
+const REWARD_VIDEO_LEVEL_INTERVAL = 5;
 
 /**
  * GameManager - Entry point controller, quản lý vòng đời game.
@@ -209,10 +209,10 @@ export class GameManager extends Component {
                 return;
             }
 
-            // Test nhanh: thắng Level 1 mở video thưởng ngay trên popup.
-            if (levelId === REWARD_VIDEO_TEST_LEVEL_ID) {
+            // Thắng level 5/10/15... thì mở video thưởng.
+            if (levelId > 0 && levelId % REWARD_VIDEO_LEVEL_INTERVAL === 0) {
                 this.ensureRewardVideoPlayer();
-                TeviLoginManager.Instance?.setDebugStatus('Level 1 xong → bắt đầu xin video token...');
+                TeviLoginManager.Instance?.setDebugStatus(`Level ${levelId} xong → xin video token...`);
                 RewardVideoPlayer.Instance?.playSecretVideo(() => {
                     // Chỉ chạy khi user xem xong/bấm X sau khi video đã PLAYING.
                     TeviLoginManager.Instance?.setDebugStatus('Đã đóng video (xem xong/X), tiếp tục game.');

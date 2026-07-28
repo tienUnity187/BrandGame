@@ -1,1 +1,1 @@
-export const GAME_NAME = 'Hippy';
+export const GAME_NAME = 'VelvetNight';

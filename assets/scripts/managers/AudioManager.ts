@@ -32,10 +32,12 @@ export class AudioManager extends Component {
     public async initialize(): Promise<void> {
         await Promise.all([
             this.loadClip('bg_main'),
-            this.loadClip('button_click'),
-            this.loadClip('order_complete'),
-            this.loadClip('panel_lose'),
-            this.loadClip('panel_win'),
+            this.loadClip('button-click'),
+            this.loadClip('order-complete'),
+            this.loadClip('ohh'),
+            this.loadClip('ohh2'),
+            this.loadClip('panel-lose'),
+            this.loadClip('panel-win'),
             this.loadClip('tile_click'),
             this.loadClip('tile_fall'),
         ]);
@@ -46,6 +48,19 @@ export class AudioManager extends Component {
         const clip = await this.loadClip(key);
         if (!clip || !this._sfxSource) return;
         this._sfxSource.playOneShot(clip, this._sfxVolume);
+    }
+
+    /** order-complete + random ohh/ohh2, phát song song. */
+    public async playOrderCompleteSfx(): Promise<void> {
+        if (this._sfxMuted || !this._sfxSource) return;
+        const ohhKey = Math.random() < 0.5 ? 'ohh' : 'ohh2';
+        const [orderClip, ohhClip] = await Promise.all([
+            this.loadClip('order-complete'),
+            this.loadClip(ohhKey),
+        ]);
+        if (!this._sfxSource) return;
+        if (orderClip) this._sfxSource.playOneShot(orderClip, this._sfxVolume);
+        if (ohhClip) this._sfxSource.playOneShot(ohhClip, this._sfxVolume);
     }
 
     public async playLoopSfx(key: string): Promise<void> {
@@ -191,7 +206,7 @@ export class AudioManager extends Component {
     }
 
     private onAnyButtonClicked(): void {
-        this.playUi('button_click');
+        this.playUi('button-click');
         if (this._currentMusicKey && !this._musicMuted && !this._musicSource?.playing) {
             this._musicSource?.play();
         }

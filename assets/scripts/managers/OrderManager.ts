@@ -250,7 +250,7 @@ export class OrderManager {
             };
 
             EventBus.getInstance().once(GameEvent.ORDER_TILES_CLEARED, finalizeFinalOrder, this);
-            AudioManager.getInstance()?.playSfx('order_complete');
+            AudioManager.getInstance()?.playOrderCompleteSfx();
             EventBus.getInstance().emit(GameEvent.ORDER_COMPLETED, completedOrder, this._currentOrderIndex, completedTileIds);
             if (!TrayManager.getInstance().isClearingOrderTiles()) {
                 setTimeout(finalizeFinalOrder, 0);
@@ -258,7 +258,7 @@ export class OrderManager {
             return;
         }
 
-        AudioManager.getInstance()?.playSfx('order_complete');
+        AudioManager.getInstance()?.playOrderCompleteSfx();
         EventBus.getInstance().emit(GameEvent.ORDER_COMPLETED, completedOrder, this._currentOrderIndex, completedTileIds);
 
         this._currentOrderIndex++;

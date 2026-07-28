@@ -171,7 +171,7 @@ function countSameLayerOverlaps(tiles, config) {
 
 /**
  * Sync board tile size to catalog max and grow spacing until same-layer AABBs no longer collide.
- * Prevents Hippy size drift (catalog taller/wider than spacing baked for older packs).
+ * Prevents VelvetNight size drift (catalog taller/wider than spacing baked for older packs).
  */
 function ensureCatalogAwareSpacing(config, tiles) {
   if (!tiles.length) return;
