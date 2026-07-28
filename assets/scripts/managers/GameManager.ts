@@ -650,6 +650,9 @@ export class GameManager extends Component {
     }
 
     private async ensureInitialLeadInfo(): Promise<boolean> {
+        // Skip lead form in Editor so preview play doesn't block on HTML form
+        if (EDITOR) return true;
+
         const saveManager = SaveManager.getInstance();
         if (saveManager.hasLeadInfo()) return true;
 
