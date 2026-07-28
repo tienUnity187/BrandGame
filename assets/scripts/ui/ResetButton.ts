@@ -1,11 +1,12 @@
 import { _decorator, Component, Button } from 'cc';
+import { GameManager } from '../managers/GameManager';
 import { LevelManager } from '../managers/LevelManager';
 
 const { ccclass, property } = _decorator;
 
 /**
  * ResetButton - Attach vào một Button node trong scene.
- * Khi nhấn sẽ trigger level failed (restart màn hiện tại).
+ * Khi nhấn sẽ reset ngay màn hiện tại.
  */
 @ccclass('ResetButton')
 export class ResetButton extends Component {
@@ -13,12 +14,14 @@ export class ResetButton extends Component {
         const button = this.getComponent(Button);
         if (button) {
             button.node.on('click', this.onResetClicked, this);
-        } else {
-                    }
+        }
     }
 
     private onResetClicked(): void {
-                LevelManager.getInstance().onLevelFailed();
+        const levelId = LevelManager.getInstance().getCurrentLevelId();
+        if (levelId > 0) {
+            GameManager.Instance?.startLevel(levelId);
+        }
     }
 
     protected onDestroy(): void {
