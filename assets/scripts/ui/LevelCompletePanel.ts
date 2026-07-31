@@ -28,7 +28,7 @@ export class LevelCompletePanel extends BasePanel {
 
     protected onShow(data?: any): void {
         super.onShow(data);
-        AudioManager.getInstance()?.playUi('panel-win');
+        AudioManager.getInstance()?.playRandomWinUi();
         this._data = data || {};
         this.updateUI();
         this.bindButtons();

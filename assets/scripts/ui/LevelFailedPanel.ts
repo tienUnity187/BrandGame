@@ -24,7 +24,7 @@ export class LevelFailedPanel extends BasePanel {
 
     protected onShow(data?: any): void {
         super.onShow(data);
-        AudioManager.getInstance()?.playUi('panel-lose');
+        AudioManager.getInstance()?.playRandomLoseUi();
         if (this.node.parent) {
             this.node.setSiblingIndex(this.node.parent.children.length - 1);
         }

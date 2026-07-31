@@ -334,6 +334,9 @@ export class GameManager extends Component {
             if (this.homeScreen) this.homeScreen.active = false;
         }
 
+        // Random BGM + crossfade mỗi lần vào / qua level
+        AudioManager.getInstance()?.playRandomMainMusic();
+
         // Ensure ORDER_MATCH managers exist in scene
                 this.ensureOrderManagers();
 
@@ -531,7 +534,7 @@ export class GameManager extends Component {
         if (!this.homeScreen?.active) return;
 
         this._postInitHomeStarted = true;
-        AudioManager.getInstance()?.playMusic('bg_main');
+        AudioManager.getInstance()?.playRandomMainMusic();
         AudioManager.getInstance()?.bindButtonSounds(this.homeScreen);
         this.preloadHomeGameplayAssets();
     }
@@ -670,7 +673,7 @@ export class GameManager extends Component {
 
     private async transitionToHome(): Promise<void> {
         await this.transitionScreens(this.gameScreen, this.homeScreen);
-        AudioManager.getInstance()?.playMusic('bg_main');
+        AudioManager.getInstance()?.playRandomMainMusic();
         AudioManager.getInstance()?.bindButtonSounds(this.homeScreen);
         this.startPlayButtonPulse();
         this.preloadHomeGameplayAssets();

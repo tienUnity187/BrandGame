@@ -957,8 +957,8 @@
     "_prefab": null,
     "_lpos": {
       "__type__": "cc.Vec3",
-      "x": 0,
-      "y": 184.009,
+      "x": -0.125,
+      "y": 200.066,
       "z": 0
     },
     "_lrot": {
@@ -1497,7 +1497,7 @@
       "__id__": 36
     },
     "slotSpacing": 170,
-    "slotOffsetY": -39.6,
+    "slotOffsetY": -27,
     "flyDuration": 0.3,
     "slotScale": 0.9,
     "orderSpacingY": 70,
@@ -1510,37 +1510,37 @@
     },
     "emptySlotColor": {
       "__type__": "cc.Color",
-      "r": 150,
-      "g": 150,
-      "b": 150,
-      "a": 172
+      "r": 255,
+      "g": 255,
+      "b": 255,
+      "a": 255
     },
     "dimmedColor": {
       "__type__": "cc.Color",
-      "r": 150,
-      "g": 150,
-      "b": 150,
-      "a": 171
+      "r": 255,
+      "g": 255,
+      "b": 255,
+      "a": 255
     },
     "orderPanelTemplate": {
       "__id__": 22
     },
     "currentOrderPanelScale": 0.9,
-    "lowerOrderPanelScale": 0.75,
+    "lowerOrderPanelScale": 0.7,
     "lowerOrderPanelColor": {
       "__type__": "cc.Color",
-      "r": 120,
-      "g": 120,
-      "b": 120,
+      "r": 255,
+      "g": 255,
+      "b": 255,
       "a": 255
     },
-    "currentToLowerSpacingY": 80,
-    "lowerToLowerSpacingY": 60,
+    "currentToLowerSpacingY": 90,
+    "lowerToLowerSpacingY": 80,
     "lowerSlotColor": {
       "__type__": "cc.Color",
-      "r": 120,
-      "g": 120,
-      "b": 120,
+      "r": 255,
+      "g": 255,
+      "b": 255,
       "a": 255
     },
     "orderDot0": {
@@ -3927,7 +3927,7 @@
     "_lpos": {
       "__type__": "cc.Vec3",
       "x": 0,
-      "y": -877.696,
+      "y": -804.724,
       "z": 0
     },
     "_lrot": {
@@ -3939,8 +3939,8 @@
     },
     "_lscale": {
       "__type__": "cc.Vec3",
-      "x": 0.5,
-      "y": 0.5,
+      "x": 1,
+      "y": 1,
       "z": 1
     },
     "_mobility": 0,
@@ -3965,8 +3965,8 @@
     "__prefab": null,
     "_contentSize": {
       "__type__": "cc.Size",
-      "width": 1016,
-      "height": 235
+      "width": 342,
+      "height": 142
     },
     "_anchorPoint": {
       "__type__": "cc.Vec2",
@@ -4081,7 +4081,7 @@
     "_left": 0,
     "_right": 0,
     "_top": 0,
-    "_bottom": -886.446,
+    "_bottom": -825.724,
     "_horizontalCenter": 0,
     "_verticalCenter": 0,
     "_isAbsLeft": true,
