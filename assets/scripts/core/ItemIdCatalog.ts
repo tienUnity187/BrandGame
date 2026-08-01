@@ -1,4 +1,4 @@
-export const ITEM_ID_COUNT = 15;
+export const ITEM_ID_COUNT = 16;
 
 export const ITEM_ID_GROUPS: string[] = Array.from({ length: ITEM_ID_COUNT }, (_, index) => `${index}`);
 

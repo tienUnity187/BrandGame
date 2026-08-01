@@ -113,9 +113,20 @@ export class TrayManager extends Component {
 
     /** Animate matched order tiles out of tray, then consume them into the current order UI. */
     private onOrderCompletedWithEffect(order: IOrder | null, orderIndex: number, tileIds?: string[]): void {
-        if (!tileIds || tileIds.length === 0) return;
+        this.clearTilesWithJumpEffect(tileIds);
+    }
+
+    /**
+     * Xóa tile khỏi tray kèm effect nhảy ra (dùng chung cho ORDER_MATCH và TRIPLE_MATCH).
+     * State tray được clear ngay để người chơi tiếp tục chọn tile trong lúc effect chạy.
+     */
+    public clearTilesWithJumpEffect(tileIds?: string[], onAllComplete?: () => void): void {
+        if (!tileIds || tileIds.length === 0) {
+            onAllComplete?.();
+            return;
+        }
         const lifecycleId = this._lifecycleId;
-        
+
         const orderTargetWorldPos = OrderTrayManager.getInstance()?.getCurrentOrderEffectWorldPosition() ?? null;
         const matchedNodes: Map<string, Node> = new Map();
 
@@ -142,17 +153,26 @@ export class TrayManager extends Component {
         this.updateSlotLabel();
 
         this._pendingOrderClearEffects = tileIds.length;
-                const onEffectComplete = () => {
+        const onEffectComplete = () => {
             if (lifecycleId !== this._lifecycleId) return;
             this._pendingOrderClearEffects--;
-                        if (this._pendingOrderClearEffects <= 0) {
+            if (this._pendingOrderClearEffects <= 0) {
                 this._pendingOrderClearEffects = 0;
-                                EventBus.getInstance().emit(GameEvent.ORDER_TILES_CLEARED);
+                EventBus.getInstance().emit(GameEvent.ORDER_TILES_CLEARED);
+                onAllComplete?.();
             }
         };
 
         for (let i = 0; i < tileIds.length; i++) {
-            this.playOrderConsumeTileEffect(tileIds[i], matchedNodes.get(tileIds[i]), orderTargetWorldPos, i, tileIds.length, lifecycleId, onEffectComplete);
+            this.playOrderConsumeTileEffect(
+                tileIds[i],
+                matchedNodes.get(tileIds[i]),
+                orderTargetWorldPos,
+                i,
+                tileIds.length,
+                lifecycleId,
+                onEffectComplete
+            );
         }
 
         this.emitTrayFullIfNeeded();
@@ -542,17 +562,11 @@ export class TrayManager extends Component {
     public isDeadEnd(): boolean {
         if (!this.isFull()) return false;
         const matchCount = this._config?.matchCount || 3;
-        // Tìm dãy liên tiếp cùng groupId với độ dài >= matchCount
-        for (let i = 0; i <= this._trayTiles.length - matchCount; i++) {
-            const groupId = this._trayTiles[i].groupId;
-            let allSame = true;
-            for (let j = 1; j < matchCount; j++) {
-                if (this._trayTiles[i + j].groupId !== groupId) {
-                    allSame = false;
-                    break;
-                }
-            }
-            if (allSame) return false; // Có thể match
+        // Có >= matchCount tile cùng groupId trên tray là vẫn match được (không cần liền kề)
+        const counts: Record<string, number> = {};
+        for (const tile of this._trayTiles) {
+            counts[tile.groupId] = (counts[tile.groupId] || 0) + 1;
+            if (counts[tile.groupId] >= matchCount) return false;
         }
         return true;
     }

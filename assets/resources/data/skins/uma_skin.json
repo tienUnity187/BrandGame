@@ -77,6 +77,11 @@
         "key": "tile_14",
         "path": "skins/uma/tiles/14",
         "assetType": "sprite"
+      },
+      {
+        "key": "tile_15",
+        "path": "skins/uma/tiles/15",
+        "assetType": "sprite"
       }
     ],
     "background": [
@@ -171,6 +176,7 @@
     "11",
     "12",
     "13",
-    "14"
+    "14",
+    "15"
   ]
 }
