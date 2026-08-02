@@ -35,14 +35,14 @@ export class BoosterManager extends Component {
     public static Instance: BoosterManager;
     public static getInstance(): BoosterManager { return BoosterManager.Instance; }
 
-    private readonly _defaultHintCount = 1;
+    private readonly _defaultHintCount = 5;
     private readonly _defaultUndoCount = 1;
-    private readonly _maxHintCount = 1;
+    private readonly _maxHintCount = 5;
     private readonly _maxUndoCount = 1;
     private readonly _maxSkipCount = 1;
     private readonly _skipBlockedLevelId = 5;
 
-    private _hintCount: number = 1;
+    private _hintCount: number = 5;
     private _undoCount: number = 1;
     private _skipCount: number = 0;
 

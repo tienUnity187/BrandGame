@@ -291,6 +291,8 @@ export class OrderManager {
     }
 
     public isAllOrdersCompleted(): boolean {
+        // TRIPLE_MATCH / inactive: orders rỗng → 0 >= 0 sẽ luôn true và chặn onLevelFailed.
+        if (!this._isActive || this._orders.length === 0) return false;
         return this._currentOrderIndex >= this._orders.length;
     }
 
