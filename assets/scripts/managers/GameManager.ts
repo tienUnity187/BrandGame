@@ -443,6 +443,7 @@ export class GameManager extends Component {
         this.stopTimer();
         this.setState(GameState.MAIN_MENU);
         this._preparedHomeLevelId = 0;
+        ExitTrackingService.getInstance().clearGameplay();
         LevelManager.getInstance().unloadCurrentLevel();
         UIManager.getInstance().closePanel('GameplayPanel');
         UIManager.getInstance().closePanel('LevelCompletePanel');

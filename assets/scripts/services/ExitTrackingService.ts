@@ -24,6 +24,7 @@ export class ExitTrackingService {
     private static _instance: ExitTrackingService | null = null;
     private _getSessionId: (() => string) | null = null;
     private _currentLevel: number = 0;
+    private _isInGameplay = false;
     private _hasSentExit = false;
     private _isInitialized = false;
 
@@ -45,11 +46,26 @@ export class ExitTrackingService {
         this._isInitialized = true;
     }
 
+    /** Gọi khi user đã mở / bắt đầu 1 level (vào trong game). */
     public setLevel(level: number): void {
         if (!Number.isFinite(level)) return;
-        this._currentLevel = Math.max(0, Math.floor(level));
+        const nextLevel = Math.max(0, Math.floor(level));
+        if (nextLevel <= 0) {
+            this.clearGameplay();
+            return;
+        }
+        this._currentLevel = nextLevel;
+        this._isInGameplay = true;
         this._hasSentExit = false;
         console.log(`${EXIT_TRACKING_LOG_PREFIX} level_game set:`, this._currentLevel);
+    }
+
+    /** Gọi khi quay về Home / thoát khỏi phiên chơi level. */
+    public clearGameplay(): void {
+        this._isInGameplay = false;
+        this._currentLevel = 0;
+        this._hasSentExit = false;
+        console.log(`${EXIT_TRACKING_LOG_PREFIX} gameplay cleared (Home)`);
     }
 
     private isSupported(): boolean {
@@ -77,6 +93,11 @@ export class ExitTrackingService {
     private sendExitBeacon(reason: string): void {
         if (this._hasSentExit) return;
         if (!this._getSessionId) return;
+        // Chỉ track khi user đang trong game và đã mở 1 level — bỏ qua lúc còn ở Home.
+        if (!this._isInGameplay || this._currentLevel <= 0) {
+            console.log(`${EXIT_TRACKING_LOG_PREFIX} skip (${reason}): not in gameplay`);
+            return;
+        }
 
         const leadInfo = SaveManager.getInstance().getLeadInfo();
         const payload: ExitTrackingPayload = {
