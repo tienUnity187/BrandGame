@@ -6,7 +6,8 @@ import { LevelManager } from '../managers/LevelManager';
 import { OrderManager } from '../managers/OrderManager';
 import { BoosterManager } from '../managers/BoosterManager';
 import { AudioManager } from '../managers/AudioManager';
-import { BoosterType } from '../enums/BoosterType';
+import { BOOSTER_STAR_COST } from '../TeviConstants';
+import { StarWallet } from '../services/StarWallet';
 
 const { ccclass, property } = _decorator;
 
@@ -74,6 +75,7 @@ export class GameplayPanel extends BasePanel {
         EventBus.getInstance().on(GameEvent.LEVEL_TIME_UPDATED, this.onLevelTimeUpdated, this);
         EventBus.getInstance().on(GameEvent.TILE_ADDED_TO_TRAY, this.onTrayMotionChanged, this);
         EventBus.getInstance().on(GameEvent.TRAY_SETTLED, this.onTrayMotionChanged, this);
+        EventBus.getInstance().on(GameEvent.STAR_BALANCE_CHANGED, this.onStarBalanceChanged, this);
         this.bindBoosterButtons();
         this.updateBoosterUI();
     }
@@ -89,17 +91,18 @@ export class GameplayPanel extends BasePanel {
         EventBus.getInstance().off(GameEvent.LEVEL_TIME_UPDATED, this.onLevelTimeUpdated, this);
         EventBus.getInstance().off(GameEvent.TILE_ADDED_TO_TRAY, this.onTrayMotionChanged, this);
         EventBus.getInstance().off(GameEvent.TRAY_SETTLED, this.onTrayMotionChanged, this);
+        EventBus.getInstance().off(GameEvent.STAR_BALANCE_CHANGED, this.onStarBalanceChanged, this);
         this.unbindBoosterButtons();
     }
 
     private updateUI(): void {
         const levelId = LevelManager.getInstance().getCurrentLevelId();
         const score = LevelManager.getInstance().getScore();
-        const stars = LevelManager.getInstance().getStars();
+        const walletStars = StarWallet.getInstance().getBalance();
 
         if (this.levelLabel) this.levelLabel.string = `Level ${levelId}`;
         if (this.scoreLabel) this.scoreLabel.string = `${score}`;
-        if (this.starLabel) this.starLabel.string = `Stars: ${stars}`;
+        if (this.starLabel) this.starLabel.string = `★ ${walletStars}`;
         if (this.timeLabel) this.timeLabel.string = this.formatTime(this._elapsedSeconds);
         this.updateOrderLabel();
         this.updateBoosterUI();
@@ -109,8 +112,19 @@ export class GameplayPanel extends BasePanel {
         if (this.scoreLabel) this.scoreLabel.string = `${score}`;
     }
 
-    private onLevelCompleted(levelId: number, score: number, stars: number): void {
-        if (this.starLabel) this.starLabel.string = `Stars: ${stars}`;
+    private onLevelCompleted(_levelId: number, _score: number, _stars: number): void {
+        this.refreshWalletStarLabel();
+    }
+
+    private onStarBalanceChanged(): void {
+        this.refreshWalletStarLabel();
+        this.updateBoosterUI();
+    }
+
+    private refreshWalletStarLabel(): void {
+        if (this.starLabel) {
+            this.starLabel.string = `★ ${StarWallet.getInstance().getBalance()}`;
+        }
     }
 
     private onOrderChanged(order: any, orderIndex: number): void {
@@ -147,7 +161,7 @@ export class GameplayPanel extends BasePanel {
     }
 
     private onHintFailed(): void {
-        if (BoosterManager.getInstance()?.getBoosterCount(BoosterType.UNDO) > 0) {
+        if (BoosterManager.getInstance()?.canUseUndo()) {
             this.shakeUndoButton();
         }
     }
@@ -208,17 +222,16 @@ export class GameplayPanel extends BasePanel {
     private updateBoosterUI(): void {
         const booster = BoosterManager.getInstance();
         if (!booster) return;
-        const undoCount = booster.getBoosterCount(BoosterType.UNDO);
-        const hintCount = booster.getBoosterCount(BoosterType.HINT);
-        const skipCount = booster.getBoosterCount(BoosterType.SKIP);
+        const costText = `${BOOSTER_STAR_COST}★`;
 
-        if (this.undoCountLabel) this.undoCountLabel.string = `${undoCount}`;
-        if (this.hintCountLabel) this.hintCountLabel.string = `${hintCount}`;
-        if (this.skipCountLabel) this.skipCountLabel.string = `${skipCount}`;
+        if (this.undoCountLabel) this.undoCountLabel.string = costText;
+        if (this.hintCountLabel) this.hintCountLabel.string = costText;
+        if (this.skipCountLabel) this.skipCountLabel.string = costText;
 
         if (this.undoButton) this.undoButton.interactable = booster.canUseUndo();
         if (this.hintButton) this.hintButton.interactable = booster.canUseHint();
         if (this.skipButton) this.skipButton.interactable = booster.canUseSkip();
+        this.refreshWalletStarLabel();
     }
 
     private updateOrderLabel(): void {

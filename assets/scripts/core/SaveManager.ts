@@ -6,12 +6,13 @@ import { GAME_NAME } from './GameBrandConfig';
  */
 export class SaveManager {
     private static _instance: SaveManager;
-    private static readonly ENABLE_LEVEL_PROGRESS_SAVE = false;
+    private static readonly ENABLE_LEVEL_PROGRESS_SAVE = true;
     private static readonly SAVE_PREFIX = `MiniGame1_${GAME_NAME}`;
     private static readonly KEY = `${SaveManager.SAVE_PREFIX}_currentLevel`;
     private static readonly SKIP_COUNT_KEY = `${SaveManager.SAVE_PREFIX}_skipCount`;
     private static readonly DEFAULT_SKIP_COUNT = 1;
     private static readonly MAX_SKIP_COUNT = 1;
+    private static readonly MAX_LEVEL_ID = 50;
 
     private constructor() {}
 
@@ -25,7 +26,9 @@ export class SaveManager {
     public saveCurrentLevel(levelId: number): void {
         if (!SaveManager.ENABLE_LEVEL_PROGRESS_SAVE) return;
         try {
-            sys.localStorage.setItem(SaveManager.KEY, `${levelId}`);
+            const safeId = SaveManager.clampLevelId(levelId);
+            sys.localStorage.setItem(SaveManager.KEY, `${safeId}`);
+            console.log(`[SaveManager] Lưu level đang chơi: ${safeId}`);
         } catch (err) {
         }
     }
@@ -36,10 +39,14 @@ export class SaveManager {
             const value = sys.localStorage.getItem(SaveManager.KEY);
             if (value === null || value === '') return 0;
             const num = parseInt(value, 10);
-            return isNaN(num) ? 0 : num;
+            return isNaN(num) ? 0 : SaveManager.clampLevelId(num);
         } catch (err) {
             return 0;
         }
+    }
+
+    private static clampLevelId(levelId: number): number {
+        return Math.min(SaveManager.MAX_LEVEL_ID, Math.max(1, Math.floor(levelId)));
     }
 
     public clear(): void {

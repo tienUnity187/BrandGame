@@ -12,6 +12,8 @@ import { WrongTrayManager } from './WrongTrayManager';
 import { OrderTrayManager } from './OrderTrayManager';
 import { BoardPositionHelper } from '../core/BoardPositionHelper';
 import { SaveManager } from '../core/SaveManager';
+import { BOOSTER_STAR_COST } from '../TeviConstants';
+import { StarWallet } from '../services/StarWallet';
 
 const { ccclass } = _decorator;
 
@@ -129,8 +131,9 @@ export class BoosterManager extends Component {
     }
 
     public UseHint(): boolean {
-        if (this._hintCount <= 0 || !LevelManager.getInstance().isLevelActive()) return false;
-        // Nếu không có tile nào để hint và board đã settle, không trừ item, rung nhẹ
+        if (!LevelManager.getInstance().isLevelActive()) return false;
+        if (!StarWallet.getInstance().canAfford(BOOSTER_STAR_COST)) return false;
+        // Nếu không có tile nào để hint và board đã settle, không trừ Star, rung nhẹ
         if (this._queuedHintCount === 0 && !this.isHintWaitingForBoardSettle()) {
             const tile = this.GetBestHintTile();
             if (!tile) {
@@ -138,7 +141,7 @@ export class BoosterManager extends Component {
                 return false;
             }
         }
-        this._hintCount--;
+        if (!StarWallet.getInstance().trySpend(BOOSTER_STAR_COST, 'hint')) return false;
         this._queuedHintCount++;
         this.emitChanged();
         this.processHintQueue();
@@ -208,7 +211,7 @@ export class BoosterManager extends Component {
     private refundQueuedHint(): void {
         if (this._queuedHintCount <= 0) return;
         this._queuedHintCount--;
-        this._hintCount++;
+        StarWallet.getInstance().addStars(BOOSTER_STAR_COST, 'hint_refund');
         this.emitChanged();
     }
 
@@ -710,10 +713,17 @@ export class BoosterManager extends Component {
     }
 
     public UseUndo(): boolean {
-        if (this._undoCount <= 0 || !LevelManager.getInstance().isLevelActive() || this.isTileFlyingForUndo()) return false;
+        if (!LevelManager.getInstance().isLevelActive() || this.isTileFlyingForUndo()) return false;
+        if (!StarWallet.getInstance().canAfford(BOOSTER_STAR_COST)) return false;
+        if (!this.hasUndoSnapshot()) return false;
+        if (!StarWallet.getInstance().trySpend(BOOSTER_STAR_COST, 'undo')) return false;
+
         const tray = TrayManager.getInstance();
         const snapshot = this._undoStack.pop();
-        if (!snapshot) return false;
+        if (!snapshot) {
+            StarWallet.getInstance().addStars(BOOSTER_STAR_COST, 'undo_refund');
+            return false;
+        }
         const undoReturnStarts = this.captureUndoReturnStartPositions(snapshot);
         const orderChanged = !this.areOrderSnapshotsEqual(
             snapshot.order,
@@ -736,7 +746,6 @@ export class BoosterManager extends Component {
             TileManager.getInstance().setInputLocked(false);
             this._isRestoring = false;
 
-            this._undoCount--;
             this.emitUsed(BoosterType.UNDO);
             this.scheduleOnce(() => {
                 if (!LevelManager.getInstance().isLevelActive()) return;
@@ -749,11 +758,10 @@ export class BoosterManager extends Component {
     }
 
     public UseSkipLevel(): boolean {
-        if (this._skipCount <= 0 || !LevelManager.getInstance().isLevelActive()) return false;
+        if (!LevelManager.getInstance().isLevelActive()) return false;
         if (this.isSkipBlockedForCurrentLevel()) return false;
+        if (!StarWallet.getInstance().trySpend(BOOSTER_STAR_COST, 'skip')) return false;
 
-        this._skipCount--;
-        SaveManager.getInstance().saveSkipCount(this._skipCount);
         this.clearUndoStack();
         this.clearHighlight();
         this.emitUsed(BoosterType.SKIP);
@@ -1015,20 +1023,21 @@ export class BoosterManager extends Component {
     }
 
     public canUseHint(): boolean {
-        return LevelManager.getInstance().isLevelActive() && this._hintCount > 0;
+        return LevelManager.getInstance().isLevelActive()
+            && StarWallet.getInstance().canAfford(BOOSTER_STAR_COST);
     }
 
     public canUseUndo(): boolean {
         return LevelManager.getInstance().isLevelActive() &&
             !this.isTileFlyingForUndo() &&
-            this._undoCount > 0 &&
+            StarWallet.getInstance().canAfford(BOOSTER_STAR_COST) &&
             this.hasUndoSnapshot();
     }
 
     public canUseSkip(): boolean {
         return LevelManager.getInstance().isLevelActive() &&
             !this.isSkipBlockedForCurrentLevel() &&
-            this._skipCount > 0;
+            StarWallet.getInstance().canAfford(BOOSTER_STAR_COST);
     }
 
     private isSkipBlockedForCurrentLevel(): boolean {

@@ -55,11 +55,29 @@ export class AudioManager extends Component {
     protected onLoad(): void {
         if (AudioManager.Instance) { this.destroy(); return; }
         AudioManager.Instance = this;
+
+        // Mỗi kênh nhạc nằm trên node riêng để nhận đúng EventType.ENDED.
         this._musicSources = [
-            this.node.addComponent(AudioSource),
-            this.node.addComponent(AudioSource),
+            this.createMusicSource('MusicA'),
+            this.createMusicSource('MusicB'),
         ];
         this._sfxSource = this.node.addComponent(AudioSource);
+    }
+
+    private createMusicSource(name: string): AudioSource {
+        const child = new Node(name);
+        this.node.addChild(child);
+        const source = child.addComponent(AudioSource);
+        child.on(AudioSource.EventType.ENDED, () => this.onMusicSourceEnded(source), this);
+        return source;
+    }
+
+    /** Hết bài đang phát → chuyển random bài khác (không loop cùng 1 track). */
+    private onMusicSourceEnded(source: AudioSource): void {
+        if (this._musicMuted) return;
+        if (!this._currentMusicKey) return;
+        if (source !== this.getActiveMusicSource()) return;
+        void this.playRandomMainMusic(MUSIC_CROSSFADE_SECONDS);
     }
 
     public async initialize(): Promise<void> {
@@ -180,7 +198,8 @@ export class AudioManager extends Component {
 
         newSource.stop();
         newSource.clip = clip;
-        newSource.loop = true;
+        // Không loop: hết bài sẽ bắt ENDED → random sang bài khác.
+        newSource.loop = false;
 
         if (!hasOldTrack || duration <= 0) {
             oldSource.stop();

@@ -28,4 +28,6 @@ export enum GameEvent {
     ORDER_TILES_CLEARED = 'order_tiles_cleared',
     HINT_FAILED = 'hint_failed',
     LEVEL_TIME_UPDATED = 'level_time_updated',
+    /** Ví Star thay đổi: (balance, delta). */
+    STAR_BALANCE_CHANGED = 'star_balance_changed',
 }

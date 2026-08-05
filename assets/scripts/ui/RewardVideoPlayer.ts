@@ -83,17 +83,34 @@ export class RewardVideoPlayer extends Component {
 
     /**
      * Mở popup và phát video thưởng.
+     * @param videoFile Tên object trên R2, ví dụ `vn_reward_lv05.mp4`.
      * @param onClosedCallback Gọi đúng một lần khi đóng (xem hết hoặc bấm X).
      */
-    public playSecretVideo(onClosedCallback?: () => void): void {
-        void this.loadAndPlaySecretVideo(onClosedCallback);
+    public playSecretVideo(videoFile: string, onClosedCallback?: () => void): void {
+        console.log('[RewardVideoPlayer] playSecretVideo() called', {
+            videoFile,
+            tokenUrl: REWARD_VIDEO_TOKEN_URL,
+            plannedBody: { file: videoFile },
+            hasTeviToken: !!(TeviLoginManager.Instance?.getUserToken()?.trim()),
+        });
+        void this.loadAndPlaySecretVideo(videoFile, onClosedCallback);
     }
 
     /** Xin URL tạm từ Worker rồi mới phát, không giữ URL R2 trong game. */
-    private async loadAndPlaySecretVideo(onClosedCallback?: () => void): Promise<void> {
+    private async loadAndPlaySecretVideo(
+        videoFile: string,
+        onClosedCallback?: () => void,
+    ): Promise<void> {
         this.ensureUi();
         if (!this.videoPlayer || !this.videoContainer) {
             this.logStatus('Lỗi: thiếu VideoPlayer/container.');
+            onClosedCallback?.();
+            return;
+        }
+
+        const fileName = (videoFile || '').trim();
+        if (!fileName) {
+            this.logStatus('Lỗi: thiếu tên file video.');
             onClosedCallback?.();
             return;
         }
@@ -116,10 +133,10 @@ export class RewardVideoPlayer extends Component {
         if (parent) {
             this.videoContainer.setSiblingIndex(parent.children.length - 1);
         }
-        this.logStatus('Popup video đã mở, đang xin token...');
+        this.logStatus(`Popup video đã mở, đang xin token cho ${fileName}...`);
 
         try {
-            const secureVideoUrl = await this.requestSecureVideoUrl();
+            const secureVideoUrl = await this.requestSecureVideoUrl(fileName);
             // Người dùng có thể đã đóng popup trong lúc đang chờ API.
             if (requestId !== this._loadRequestId || !this._isPlaying) return;
 
@@ -159,15 +176,29 @@ export class RewardVideoPlayer extends Component {
         }
     }
 
-    /** Gửi user_app_token để Worker xác thực Tevi và cấp signed URL. */
-    private async requestSecureVideoUrl(): Promise<string> {
+    /** Gửi user_app_token + tên file để Worker xác thực Tevi và cấp signed URL. */
+    private async requestSecureVideoUrl(videoFile: string): Promise<string> {
         const userToken = TeviLoginManager.Instance?.getUserToken().trim() || '';
+        const pageOrigin = this.getPageOrigin();
+        const requestBody = { file: videoFile };
+
+        console.log('[RewardVideoPlayer] === REQUEST /video-token (verify wiring) ===');
+        console.log('[RewardVideoPlayer] POST', REWARD_VIDEO_TOKEN_URL);
+        console.log('[RewardVideoPlayer] Origin', pageOrigin || '(editor/no window.origin)');
+        console.log('[RewardVideoPlayer] Body', JSON.stringify(requestBody));
+        console.log(
+            '[RewardVideoPlayer] Authorization',
+            userToken ? `Bearer ${userToken.slice(0, 12)}...(${userToken.length} chars)` : '(MISSING — Editor thường không có)',
+        );
+
         if (!userToken) {
+            console.warn(
+                '[RewardVideoPlayer] DRY-RUN OK: tên file + body đúng, nhưng Editor thiếu user_app_token nên không gọi Worker thật.',
+            );
             throw new Error('Chưa có user_app_token. Hãy mở game bên trong ứng dụng Tevi.');
         }
 
-        const pageOrigin = this.getPageOrigin();
-        this.logStatus(`Origin=${pageOrigin || '?'} | POST /video-token`);
+        this.logStatus(`Origin=${pageOrigin || '?'} | POST /video-token file=${videoFile}`);
         TeviLoginManager.Instance?.setDebugUserInfo(`ORIGIN = ${pageOrigin || '?'}`);
 
         let response: Response;
@@ -178,7 +209,7 @@ export class RewardVideoPlayer extends Component {
                     'Authorization': `Bearer ${userToken}`,
                     'Content-Type': 'application/json',
                 },
-                body: '{}',
+                body: JSON.stringify(requestBody),
             });
         } catch (error) {
             const message = error instanceof Error ? error.message : `${error}`;

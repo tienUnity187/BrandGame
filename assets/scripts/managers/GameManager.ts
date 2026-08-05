@@ -15,14 +15,18 @@ import { WrongTrayManager } from './WrongTrayManager';
 import { BoosterManager } from './BoosterManager';
 import { GAME_NAME } from '../core/GameBrandConfig';
 import { TeviLoginManager } from '../TeviLoginManager';
+import {
+    getRewardVideoFileName,
+    logRewardVideoFilePlan,
+    REWARD_VIDEO_LEVEL_INTERVAL,
+    REWARD_VIDEO_TOKEN_URL,
+} from '../TeviConstants';
 import { RewardVideoPlayer } from '../ui/RewardVideoPlayer';
+import { StarWalletHud } from '../ui/StarWalletHud';
 
 const { ccclass, property } = _decorator;
-const WIN_LEVEL_5_CHEAT_KEY_CODE = 84; // T
+const WIN_CURRENT_LEVEL_CHEAT_KEY_CODE = 84; // T
 const BOOSTER_CHEAT_KEY_CODE = 66; // B
-const LEVEL_5_ID = 5;
-/** Mỗi mốc level bội số của giá trị này sẽ mở video thưởng. */
-const REWARD_VIDEO_LEVEL_INTERVAL = 5;
 
 /**
  * GameManager - Entry point controller, quản lý vòng đời game.
@@ -144,7 +148,7 @@ export class GameManager extends Component {
         EventBus.getInstance().on(GameEvent.LEVEL_COMPLETED, this.onLevelCompleted, this);
         EventBus.getInstance().on(GameEvent.LEVEL_FAILED, this.onLevelFailed, this);
 
-        // Editor cheats: 1-9 level, R restart, N next, T win L5, B booster cheat.
+        // Editor cheats: 1-9 level, R restart, N next, T win level hiện tại, B booster cheat.
         input.on(Input.EventType.KEY_DOWN, this.onKeyDown, this);
         this.bindLevelJumpUI();
         this.bindHomeUI();
@@ -152,12 +156,12 @@ export class GameManager extends Component {
         this.onInitializationReadyForHome();
     }
 
-    /** Editor cheats: 1-9 đổi level, R restart, N next, T thắng L5, B bật booster. */
+    /** Editor cheats: 1-9 đổi level, R restart, N next, T thắng level hiện tại, B bật booster. */
     private onKeyDown(event: EventKeyboard): void {
         if (!this.isEditorCheatEnabled()) return;
         const key = event.keyCode;
-        if (key === WIN_LEVEL_5_CHEAT_KEY_CODE) {
-            void this.runLevel5WinCheat();
+        if (key === WIN_CURRENT_LEVEL_CHEAT_KEY_CODE) {
+            void this.runWinCurrentLevelCheat();
             return;
         }
         if (this._currentState !== GameState.GAMEPLAY) return;
@@ -188,36 +192,67 @@ export class GameManager extends Component {
         }
     }
 
-    private async runLevel5WinCheat(): Promise<void> {
+    /** Cheat T: thắng ngay level đang chơi (không nhảy sang level 5). */
+    private async runWinCurrentLevelCheat(): Promise<void> {
         if (this._transitionRunning) return;
-        if (this._currentState !== GameState.GAMEPLAY) {
-            await this.waitForInitialization();
+        await this.waitForInitialization();
+
+        let currentLevelId = LevelManager.getInstance().getCurrentLevelId();
+        if (this._currentState !== GameState.GAMEPLAY || currentLevelId <= 0) {
+            currentLevelId = this.getSavedLevelId();
             await this.transitionToGame();
+            await this.startLevel(currentLevelId);
         }
-        await this.startLevel(LEVEL_5_ID);
+
+        currentLevelId = LevelManager.getInstance().getCurrentLevelId() || currentLevelId;
+        console.log(`[Cheat] T → Win level hiện tại: ${currentLevelId}`);
         setTimeout(() => {
             LevelManager.getInstance().completeLevel(false);
-        }, 300);
+        }, 100);
     }
 
     private async onLevelCompleted(levelId: number, score: number, stars: number): Promise<void> {
         try {
             this.stopTimer();
+            // Thắng rồi: lưu level tiếp theo để mở lại game tiếp tục đúng tiến trình.
+            const nextLevelId = Math.min(50, Math.max(1, levelId + 1));
+            SaveManager.getInstance().saveCurrentLevel(nextLevelId);
             const panel = await UIManager.getInstance().openPanel('LevelCompletePanel', { levelId, score, stars, elapsedSeconds: this._elapsedSeconds });
             if (!panel) {
                 this.returnToMenu();
                 return;
             }
 
-            // Thắng level 5/10/15... thì mở video thưởng.
-            if (levelId > 0 && levelId % REWARD_VIDEO_LEVEL_INTERVAL === 0) {
+            // Thắng level 5/10/15... thì mở video thưởng tương ứng trên R2.
+            const isRewardLevel = levelId > 0 && levelId % REWARD_VIDEO_LEVEL_INTERVAL === 0;
+            const videoFile = isRewardLevel ? getRewardVideoFileName(levelId) : null;
+            console.log('[RewardVideo][LevelComplete]', {
+                levelId,
+                interval: REWARD_VIDEO_LEVEL_INTERVAL,
+                isRewardLevel,
+                videoFile,
+                willCallWorker: isRewardLevel,
+                tokenUrl: REWARD_VIDEO_TOKEN_URL,
+                requestBody: videoFile ? { file: videoFile } : null,
+            });
+
+            if (isRewardLevel && videoFile) {
                 this.ensureRewardVideoPlayer();
-                TeviLoginManager.Instance?.setDebugStatus(`Level ${levelId} xong → xin video token...`);
-                RewardVideoPlayer.Instance?.playSecretVideo(() => {
+                TeviLoginManager.Instance?.setDebugStatus(
+                    `Level ${levelId} xong → xin video ${videoFile}...`,
+                );
+                console.log(
+                    `[RewardVideo][LevelComplete] OK → playSecretVideo("${videoFile}")`,
+                );
+                RewardVideoPlayer.Instance?.playSecretVideo(videoFile, () => {
                     // Chỉ chạy khi user xem xong/bấm X sau khi video đã PLAYING.
                     TeviLoginManager.Instance?.setDebugStatus('Đã đóng video (xem xong/X), tiếp tục game.');
                     console.log('[RewardVideo] Đã đóng video, tiếp tục game.');
                 });
+            } else {
+                console.log(
+                    `[RewardVideo][LevelComplete] Skip video (level ${levelId} không phải mốc % ${REWARD_VIDEO_LEVEL_INTERVAL})`,
+                );
             }
         } catch (err) {
             this.returnToMenu();
@@ -276,6 +311,16 @@ export class GameManager extends Component {
         ]);
         this.ensureOrderManagers();
         this.ensureRewardVideoPlayer();
+        this.ensureStarWalletHud();
+        // Editor: in sẵn bảng map level→file để xác nhận wiring đúng (không cần máy thật).
+        logRewardVideoFilePlan('[RewardVideo][Boot]');
+        console.log('[RewardVideo][Boot] Token endpoint =', REWARD_VIDEO_TOKEN_URL);
+            console.log(
+            '[RewardVideo][Boot] Trigger khi level %',
+            REWARD_VIDEO_LEVEL_INTERVAL,
+            '=== 0. Cheat Editor: phím T = thắng level hiện tại.',
+        );
+        console.log('[Save] Level đã lưu khi mở game =', this.getSavedLevelId());
 
         this.setState(GameState.MAIN_MENU);
     }
@@ -518,7 +563,9 @@ export class GameManager extends Component {
 
     private getSavedLevelId(): number {
         const savedLevel = SaveManager.getInstance().getCurrentLevel();
-        return savedLevel > 0 ? savedLevel : 1;
+        const levelId = savedLevel > 0 ? savedLevel : 1;
+        console.log('[Save] getSavedLevelId →', levelId);
+        return levelId;
     }
 
     private async waitForInitialization(): Promise<void> {
@@ -621,6 +668,27 @@ export class GameManager extends Component {
         rewardNode.setParent(parent);
         rewardNode.setPosition(0, 0, 0);
         rewardNode.addComponent(RewardVideoPlayer);
+    }
+
+    /** HUD ★ + panel sandbox nạp Star (tự tạo runtime, luôn trên cùng). */
+    private ensureStarWalletHud(): void {
+        const existing = StarWalletHud.Instance
+            || director.getScene()?.getComponentInChildren(StarWalletHud)
+            || null;
+        if (existing && existing.node?.isValid) {
+            StarWalletHud.Instance = existing;
+            existing.node.setSiblingIndex(existing.node.parent ? existing.node.parent.children.length - 1 : 0);
+            return;
+        }
+
+        const parent = this.uiRoot || this.node;
+        const hudNode = new Node('StarWalletHud');
+        hudNode.layer = parent.layer;
+        hudNode.addComponent(UITransform);
+        hudNode.setParent(parent);
+        hudNode.setPosition(0, 0, 0);
+        hudNode.addComponent(StarWalletHud);
+        hudNode.setSiblingIndex(parent.children.length - 1);
     }
 
     private ensureOpacity(node: Node): UIOpacity {
