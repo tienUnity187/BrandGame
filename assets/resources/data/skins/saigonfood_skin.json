@@ -80,6 +80,11 @@
         "key": "panel_LevelFailedPanel",
         "path": "prefabs/ui/panel_lose",
         "assetType": "prefab"
+      },
+      {
+        "key": "panel_RewardVideoGalleryPanel",
+        "path": "prefabs/ui/panel_clips",
+        "assetType": "prefab"
       }
     ],
     "particle": [

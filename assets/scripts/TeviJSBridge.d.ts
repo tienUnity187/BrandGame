@@ -13,6 +13,9 @@ interface TeviLoadConfigOptions {
 interface TeviGetUserInfoOptions {
     is_popup: boolean;
     app_id: string;
+    /** Một số bản bridge nhận scopes khi xin quyền Payment. */
+    scopes?: string[];
+    [key: string]: unknown;
 }
 
 interface TeviUserInfo {

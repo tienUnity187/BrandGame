@@ -26,6 +26,8 @@ export class TeviLoginManager extends Component {
     private _getUserInfoRetryCount = 0;
     private _isRequestingUserInfo = false;
     private _hasStartedUserInfoFlow = false;
+    /** Đã thử popup khi JWT.app lệch APP_ID (tránh loop). */
+    private _jwtMismatchPopupAttempted = false;
 
     @property({
         type: Label,
@@ -68,8 +70,12 @@ export class TeviLoginManager extends Component {
         this._hasStartedUserInfoFlow = false;
         this._isRequestingUserInfo = false;
         this._getUserInfoRetryCount = 0;
+        this._jwtMismatchPopupAttempted = false;
 
-        // Lần mở lại Mini App: hiện ngay user cache để không kẹt ở "Đang loadConfig...".
+        // Đổi APP_ID hoặc token JWT thuộc app khác → xóa cache trước khi gọi bridge.
+        this.purgeStaleSessionIfNeeded('startup');
+
+        // Lần mở lại Mini App: hiện user cache (đã validate JWT.app).
         this.restoreCachedLoginUi();
 
         if (typeof window === 'undefined' || !window.TeviJS) {
@@ -87,24 +93,25 @@ export class TeviLoginManager extends Component {
         }
 
         const teviJS = window.TeviJS as any;
+        const loadConfigPayload = {
+            optionMenu: true,
+            config: {
+                app_id: APP_ID,
+                env: ENV,
+            },
+            version: VERSION,
+        };
+        console.log('[TeviLogin] loadConfig payload:', loadConfigPayload);
+
         if (!this.getUserToken()) {
-            this.setStatus(`Đang loadConfig... Origin=${pageOrigin || '?'}`);
+            this.setStatus(`loadConfig app=${APP_ID} env=${ENV} v${VERSION}`);
         } else {
-            this.setStatus(`Làm mới phiên... Origin=${pageOrigin || '?'}`);
+            this.setStatus(`Refresh session app=${APP_ID} JWT.app=${this.getTokenAppId() || '?'}`);
         }
 
         try {
-            // Theo docs Tevi: loadConfig trước, đợi callback/native sẵn sàng rồi mới getUserInfo.
-            // helper_tevi.js nhận (config, callback); một số bản type cũ chỉ khai báo 1 tham số.
             teviJS.loadConfig(
-                {
-                    optionMenu: true,
-                    config: {
-                        app_id: APP_ID,
-                        env: ENV,
-                    },
-                    version: VERSION,
-                },
+                loadConfigPayload,
                 (response: TeviBridgeResponse) => this.onLoadConfigFinished(response),
             );
 
@@ -120,25 +127,92 @@ export class TeviLoginManager extends Component {
         }
     }
 
-    /** Hiện lại user đã lưu để UI không trống khi reload Mini App. */
+    /** Hiện lại user đã lưu (chỉ khi JWT.app khớp APP_ID). */
     private restoreCachedLoginUi(): void {
         const token = this.getUserToken();
         const userId = this.getUserId();
         if (!token || !userId) {
-            this.setStatus('Đang kết nối...');
-            this.setUserInfo('');
+            this.setStatus('Đang kết nối Tevi...');
+            const origin = typeof window !== 'undefined' ? (window.location?.origin || '') : '';
+            this.setUserInfo(origin ? `ORIGIN = ${origin}` : '');
             return;
         }
 
-        this.setStatus('Đăng nhập Tevi thành công (cache)');
-        this.setUserInfo(`User ID: ${userId}`);
+        const jwtApp = this.readTokenAppId(token);
+        if (jwtApp && jwtApp !== APP_ID) {
+            this.setStatus(`Token cache sai app: JWT.app=${jwtApp} ≠ ${APP_ID}`);
+            this.setUserInfo('Clear Token hoặc mở đúng Mini App trên Tevi');
+            return;
+        }
+
+        this.setStatus(`Login cache OK JWT.app=${jwtApp || APP_ID}`);
+        this.setUserInfo(`User ID: ${userId} | JWT.app=${jwtApp || APP_ID}`);
+    }
+
+    /**
+     * Xóa token nếu đổi APP_ID trong build mới, hoặc JWT không thuộc app hiện tại.
+     * @returns true nếu đã xóa session
+     */
+    private purgeStaleSessionIfNeeded(reason: string): boolean {
+        let lastAppId = '';
+        try {
+            lastAppId = sys.localStorage.getItem(STORAGE_KEYS.LAST_APP_ID) || '';
+        } catch {
+            // ignore
+        }
+
+        const token = this.getUserToken();
+        const jwtApp = token ? this.readTokenAppId(token) : '';
+        const appIdChanged = lastAppId !== '' && lastAppId !== APP_ID;
+        const jwtMismatch = jwtApp !== '' && jwtApp !== APP_ID;
+
+        if (appIdChanged || jwtMismatch) {
+            console.warn('[TeviLogin] Purging stale session:', {
+                reason,
+                lastAppId,
+                jwtApp,
+                expect: APP_ID,
+                appIdChanged,
+                jwtMismatch,
+            });
+            this.clearTeviSessionInternal(
+                appIdChanged
+                    ? `APP_ID đổi ${lastAppId}→${APP_ID}`
+                    : `JWT.app=${jwtApp}≠${APP_ID}`,
+            );
+            return true;
+        }
+
+        if (!lastAppId) {
+            try {
+                sys.localStorage.setItem(STORAGE_KEYS.LAST_APP_ID, APP_ID);
+            } catch {
+                // ignore
+            }
+        }
+        return false;
+    }
+
+    private clearTeviSessionInternal(reason: string): void {
+        try {
+            sys.localStorage.removeItem(STORAGE_KEYS.USER_TOKEN);
+            sys.localStorage.removeItem(STORAGE_KEYS.USER_ID);
+            sys.localStorage.setItem(STORAGE_KEYS.LAST_APP_ID, APP_ID);
+        } catch (error) {
+            console.warn('[TeviLogin] clearTeviSessionInternal failed:', error);
+        }
+        this.setUserInfo('');
+        this.setStatus(`Đã xóa token (${reason})`);
+        console.log('[TeviLogin] Cleared session:', reason);
     }
 
     /** Có thể nối hàm này với Button để người dùng thử đăng nhập lại. */
-    public requestUserInfo(): void {
+    public requestUserInfo(forcePopup = false): void {
         if (this._isRequestingUserInfo) return;
 
-        this.setStatus('Đang lấy thông tin người dùng...');
+        this.setStatus(forcePopup
+            ? `getUserInfo popup app=${APP_ID}...`
+            : `getUserInfo app=${APP_ID} popup=${this.showLoginPopup}`);
 
         if (typeof window === 'undefined' || !window.TeviJS) {
             this.setStatus('Không tìm thấy TeviJS. Hãy chạy game trong ứng dụng Tevi.');
@@ -147,11 +221,14 @@ export class TeviLoginManager extends Component {
 
         const teviJS = window.TeviJS;
         this._isRequestingUserInfo = true;
+        const usePopup = forcePopup || this.showLoginPopup;
+
+        console.log('[TeviLogin] getUserInfo request:', { app_id: APP_ID, is_popup: usePopup });
 
         try {
             teviJS.getUserInfo(
                 {
-                    is_popup: this.showLoginPopup,
+                    is_popup: usePopup,
                     app_id: APP_ID,
                 },
                 response => this.handleUserInfoResponse(response),
@@ -159,6 +236,19 @@ export class TeviLoginManager extends Component {
         } catch (error) {
             this._isRequestingUserInfo = false;
             this.handleFailure('GET_USER_INFO_ERROR', error);
+        }
+    }
+
+    /** Ép login popup — dùng khi JWT.app lệch hoặc sau Clear Token. */
+    public forceReLoginWithPopup(): void {
+        this._jwtMismatchPopupAttempted = false;
+        this.clearTeviSessionInternal('forceReLogin');
+        this._hasStartedUserInfoFlow = false;
+        this._isRequestingUserInfo = false;
+        if (typeof window !== 'undefined' && window.TeviJS) {
+            this.requestUserInfo(true);
+        } else {
+            this.initializeTevi();
         }
     }
 
@@ -172,6 +262,27 @@ export class TeviLoginManager extends Component {
         }
     }
 
+    /**
+     * Xóa token/user cache trên máy (localStorage).
+     * Dùng khi JWT.app thuộc app khác dù config APP_ID đang là app hiện tại.
+     */
+    public clearTeviSession(reason: string = 'manual'): void {
+        this.clearTeviSessionInternal(reason);
+        this.setStatus(`Đã xóa token cache (${reason}). Mở lại Mini App ${APP_ID} trên Tevi.`);
+    }
+
+    /** app_id trong JWT hiện tại (rỗng nếu chưa login / không decode được). */
+    public getTokenAppId(): string {
+        return this.readTokenAppId(this.getUserToken());
+    }
+
+    private readTokenAppId(token: string): string {
+        const claims = this.decodeJwtPayload(token);
+        if (!claims) return '';
+        const raw = claims.app_id ?? claims.appId ?? claims.aud ?? '';
+        return raw === undefined || raw === null ? '' : `${raw}`.trim();
+    }
+
     /** User ID hiện tại để các module tích hợp Tevi sử dụng sau này. */
     public getUserId(): string {
         try {
@@ -180,6 +291,94 @@ export class TeviLoginManager extends Component {
             console.warn('[TeviLogin] Không thể đọc user ID:', error);
             return '';
         }
+    }
+
+    /**
+     * Xin lại user_app_token với popup (sau khi bật Payment trên Console).
+     * Token cũ có thể thiếu scope payment.write → APP_003.
+     */
+    public refreshLoginForPayment(): Promise<string> {
+        return new Promise((resolve, reject) => {
+            if (typeof window === 'undefined' || !window.TeviJS) {
+                reject(new Error('Không có TeviJS — mở trong app Tevi.'));
+                return;
+            }
+            if (this._isRequestingUserInfo) {
+                reject(new Error('Đang xin login — thử lại sau vài giây.'));
+                return;
+            }
+
+            try {
+                sys.localStorage.removeItem(STORAGE_KEYS.USER_TOKEN);
+            } catch {
+                // ignore
+            }
+
+            this._isRequestingUserInfo = true;
+            this.setStatus('Xin lại quyền Payment (popup)...');
+
+            const prevPopup = this.showLoginPopup;
+            this.showLoginPopup = true;
+
+            try {
+                window.TeviJS.getUserInfo(
+                    {
+                        is_popup: true,
+                        app_id: APP_ID,
+                        scopes: ['payment.write'],
+                    },
+                    (response) => {
+                        this.showLoginPopup = prevPopup;
+                        this._isRequestingUserInfo = false;
+
+                        const normalized = this.normalizeBridgePayload(response);
+                        if (!normalized || this.hasErrorCode(normalized?.error_code)) {
+                            reject(new Error(
+                                this.getBridgeErrorMessage(normalized || {})
+                                || `Refresh login thất bại (${normalized?.error_code ?? '?'})`,
+                            ));
+                            return;
+                        }
+
+                        const extracted = this.extractUserCredentials(normalized);
+                        if (!extracted.token) {
+                            reject(new Error('Refresh login: thiếu user_app_token.'));
+                            return;
+                        }
+
+                        const jwtApp = this.readTokenAppId(extracted.token);
+                        if (jwtApp && jwtApp !== APP_ID) {
+                            reject(new Error(
+                                `Token Payment thuộc app khác: JWT.app=${jwtApp}, cần ${APP_ID}. `
+                                + 'Mở game từ Portal Mini App đúng, không phải app cũ trên Tevi.',
+                            ));
+                            return;
+                        }
+
+                        try {
+                            sys.localStorage.setItem(STORAGE_KEYS.USER_TOKEN, extracted.token);
+                            sys.localStorage.setItem(STORAGE_KEYS.LAST_APP_ID, APP_ID);
+                            if (extracted.userId) {
+                                sys.localStorage.setItem(STORAGE_KEYS.USER_ID, extracted.userId);
+                            }
+                        } catch (error) {
+                            reject(error instanceof Error ? error : new Error(`${error}`));
+                            return;
+                        }
+
+                        this.setStatus('Đã xin lại token Payment');
+                        this.setUserInfo(extracted.userName
+                            ? `${extracted.userName} (ID: ${extracted.userId})`
+                            : `User ID: ${extracted.userId}`);
+                        resolve(extracted.token);
+                    },
+                );
+            } catch (error) {
+                this.showLoginPopup = prevPopup;
+                this._isRequestingUserInfo = false;
+                reject(error instanceof Error ? error : new Error(`${error}`));
+            }
+        });
     }
 
     private onLoadConfigFinished(response?: TeviBridgeResponse): void {
@@ -236,25 +435,60 @@ export class TeviLoginManager extends Component {
             return;
         }
 
+        const jwtApp = this.readTokenAppId(extracted.token);
+        const appMatch = jwtApp === APP_ID || jwtApp === '';
+
+        if (!appMatch && jwtApp) {
+            console.error('[TeviLogin] getUserInfo trả JWT app khác:', {
+                jwtApp,
+                expect: APP_ID,
+                sentAppId: APP_ID,
+                hint: 'Tevi native gắn token theo Mini App đang mở trên app Tevi, không chỉ theo JS app_id.',
+            });
+
+            if (!this._jwtMismatchPopupAttempted) {
+                this._jwtMismatchPopupAttempted = true;
+                this.clearTeviSessionInternal(`JWT.app=${jwtApp}`);
+                this.setStatus(`JWT.app=${jwtApp} ≠ ${APP_ID} → thử popup login...`);
+                this.scheduleOnce(() => this.requestUserInfo(true), 0.3);
+                return;
+            }
+
+            this.handleFailure(
+                'JWT_APP_MISMATCH',
+                `JWT.app=${jwtApp} nhưng game cần ${APP_ID}. `
+                + `Đóng Mini App → mở lại từ Portal app ${APP_ID}. `
+                + 'URL GitHub chỉ nên gắn 1 app trên Portal.',
+            );
+            return;
+        }
+
         try {
             sys.localStorage.setItem(STORAGE_KEYS.USER_TOKEN, extracted.token);
             sys.localStorage.setItem(STORAGE_KEYS.USER_ID, extracted.userId);
+            sys.localStorage.setItem(STORAGE_KEYS.LAST_APP_ID, APP_ID);
         } catch (error) {
             this.handleFailure('LOCAL_STORAGE_ERROR', error);
             return;
         }
 
         this._getUserInfoRetryCount = 0;
+        this._jwtMismatchPopupAttempted = false;
         this.setStatus(this._usingDeveloperMock
-            ? 'Đăng nhập Tevi thành công (Developer Mock)'
-            : 'Đăng nhập Tevi thành công');
-        this.setUserInfo(extracted.userName
-            ? `${extracted.userName} (ID: ${extracted.userId})`
-            : `User ID: ${extracted.userId}`);
+            ? `Login OK (Mock) JWT.app=${jwtApp || APP_ID} expect=${APP_ID}`
+            : `Login OK JWT.app=${jwtApp || APP_ID} expect=${APP_ID} match=true`);
+        this.setUserInfo(
+            (extracted.userName
+                ? `${extracted.userName} (ID: ${extracted.userId})`
+                : `User ID: ${extracted.userId}`)
+            + ` | JWT.app=${jwtApp || APP_ID}`,
+        );
         console.log('[TeviLogin] Đăng nhập thành công:', {
             userId: extracted.userId,
             userName: extracted.userName,
             appId: APP_ID,
+            jwtApp,
+            match: true,
             env: ENV,
         });
     }

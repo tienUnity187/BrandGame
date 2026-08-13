@@ -80,7 +80,16 @@ export class AudioManager extends Component {
         void this.playRandomMainMusic(MUSIC_CROSSFADE_SECONDS);
     }
 
+    /**
+     * Boot nhẹ cho Splash→Home: chỉ load SFX cần ngay (click nút).
+     * BGM / win-lose / gameplay SFX load lazy hoặc qua preloadRemainingAssets().
+     */
     public async initialize(): Promise<void> {
+        await this.loadClip('button-click');
+    }
+
+    /** Preload phần audio còn lại khi đã vào Home (không chặn splash). */
+    public async preloadRemainingAssets(): Promise<void> {
         await Promise.all([
             ...AudioManager.MAIN_MUSIC_KEYS.map(key => this.loadClip(key)),
             ...AudioManager.PANEL_WIN_KEYS.map(key => this.loadClip(key)),

@@ -257,9 +257,10 @@ export class LevelManager {
             WrongTrayManager.getInstance()?.initialize(orderConfig.wrongTrayMaxSlots);
         }
 
-        // Prewarm pool và preload sprite để tránh giật khi instantiate/runtime load
+        // Prewarm pool và preload sprite level (chỉ tile dùng trong màn, không load cả skin)
         TileManager.getInstance().prewarmPool(tilesToSpawn.length);
-        await SkinManager.getInstance().prewarmSkinSprites();
+        const groupIds = [...new Set(tilesToSpawn.map(tile => normalizeItemId(tile.groupId)))];
+        await SkinManager.getInstance().prewarmSkinSprites(groupIds);
         if (loadToken !== this._loadToken) return;
 
         // Spawn với animation rơi từ trên xuống theo thứ tự layer dưới trước

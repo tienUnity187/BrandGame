@@ -30,4 +30,6 @@ export enum GameEvent {
     LEVEL_TIME_UPDATED = 'level_time_updated',
     /** Ví Star thay đổi: (balance, delta). */
     STAR_BALANCE_CHANGED = 'star_balance_changed',
+    /** Danh sách clip thưởng đã xem thay đổi: (levelId). */
+    REWARD_VIDEO_HISTORY_CHANGED = 'reward_video_history_changed',
 }

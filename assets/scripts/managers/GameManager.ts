@@ -1,4 +1,4 @@
-import { _decorator, Component, director, Node, Prefab, resources, input, Input, KeyCode, EventKeyboard, UITransform, EditBox, Button, view, ResolutionPolicy, tween, UIOpacity, Vec3, Tween } from 'cc';
+import { _decorator, Component, director, Node, Prefab, resources, input, Input, KeyCode, EventKeyboard, UITransform, EditBox, Button, Label, view, ResolutionPolicy, tween, UIOpacity, Vec3, Tween } from 'cc';
 import { EDITOR, PREVIEW } from 'cc/env';
 import { GameState } from '../enums/GameState';
 import { GameEvent } from '../enums/GameEvent';
@@ -21,6 +21,8 @@ import {
     REWARD_VIDEO_LEVEL_INTERVAL,
     REWARD_VIDEO_TOKEN_URL,
 } from '../TeviConstants';
+import { RewardVideoHistory } from '../services/RewardVideoHistory';
+import { RewardVideoGalleryPanel } from '../ui/RewardVideoGalleryPanel';
 import { RewardVideoPlayer } from '../ui/RewardVideoPlayer';
 import { StarWalletHud } from '../ui/StarWalletHud';
 
@@ -78,6 +80,14 @@ export class GameManager extends Component {
     @property(Button)
     public playGameButton: Button | null = null;
 
+    /** Nút mở thư viện clip trên Home (prefab panel_clips). */
+    @property(Button)
+    public clipsButton: Button | null = null;
+
+    /** Label trên nút Clip (hiện "Clip" / "Clip (n)"). */
+    @property(Label)
+    public clipsButtonLabel: Label | null = null;
+
     @property(Node)
     public gameScreen: Node | null = null;
 
@@ -130,6 +140,7 @@ export class GameManager extends Component {
             homeOpacity.opacity = 0;
             tween(homeOpacity).to(0.25, { opacity: 255 }).start();
         }
+        this.setClipsButtonVisible(true);
 
         if (this.splashNode) {
             const splashOpacity = this.splashNode.getComponent(UIOpacity)!;
@@ -147,11 +158,13 @@ export class GameManager extends Component {
         // Listen for level end events to switch panels
         EventBus.getInstance().on(GameEvent.LEVEL_COMPLETED, this.onLevelCompleted, this);
         EventBus.getInstance().on(GameEvent.LEVEL_FAILED, this.onLevelFailed, this);
+        EventBus.getInstance().on(GameEvent.REWARD_VIDEO_HISTORY_CHANGED, this.refreshClipsButtonLabel, this);
 
         // Editor cheats: 1-9 level, R restart, N next, T win level hiện tại, B booster cheat.
         input.on(Input.EventType.KEY_DOWN, this.onKeyDown, this);
         this.bindLevelJumpUI();
         this.bindHomeUI();
+        this.refreshClipsButtonLabel();
         this.startPlayButtonPulse();
         this.onInitializationReadyForHome();
     }
@@ -246,9 +259,10 @@ export class GameManager extends Component {
                 );
                 RewardVideoPlayer.Instance?.playSecretVideo(videoFile, () => {
                     // Chỉ chạy khi user xem xong/bấm X sau khi video đã PLAYING.
+                    // Lưu local + cập nhật list Clip được xử lý trong RewardVideoPlayer.
                     TeviLoginManager.Instance?.setDebugStatus('Đã đóng video (xem xong/X), tiếp tục game.');
                     console.log('[RewardVideo] Đã đóng video, tiếp tục game.');
-                });
+                }, levelId);
             } else {
                 console.log(
                     `[RewardVideo][LevelComplete] Skip video (level ${levelId} không phải mốc % ${REWARD_VIDEO_LEVEL_INTERVAL})`,
@@ -272,50 +286,44 @@ export class GameManager extends Component {
     }
 
 
-    /** Khởi tạo tuần tự các hệ thống */
+    /**
+     * Boot tối thiểu để hiện Home nhanh trên web.
+     * Audio nặng (~BGM), tile sprites và UI panels được warm sau khi Home hiện.
+     */
     private async initializeGame(): Promise<void> {
         this.setState(GameState.LOADING);
 
-                                        
         await ConfigManager.getInstance().loadConfig();
 
         const skinMgr = SkinManager.getInstance();
         if (!skinMgr) {
-                        return;
+            return;
         }
         if (typeof skinMgr.loadDefaultSkin !== 'function') {
-                        return;
+            return;
         }
         await skinMgr.loadDefaultSkin();
-        await skinMgr.prewarmSkinSprites();
 
         const audioMgr = AudioManager.getInstance();
-        if (!audioMgr) {
-                        return;
+        if (audioMgr) {
+            await audioMgr.initialize();
+            audioMgr.bindButtonSounds(this.node);
         }
-        await audioMgr.initialize();
-        audioMgr.bindButtonSounds(this.node);
 
         await LevelManager.getInstance().initialize();
 
-        // Register tile prefab for object pooling
+        // Tile prefab cần sẵn trước khi Play; nhẹ hơn nhiều so với audio/sprites.
         await this.registerTilePrefab();
 
         UIManager.getInstance().initialize(this.uiRoot);
         AudioManager.getInstance()?.bindButtonSounds(this.uiRoot);
-        await UIManager.getInstance().preloadPanels([
-            'GameplayPanel',
-            'LevelCompletePanel',
-            'LevelFailedPanel',
-            'LevelSelectPanel',
-        ]);
         this.ensureOrderManagers();
         this.ensureRewardVideoPlayer();
         this.ensureStarWalletHud();
         // Editor: in sẵn bảng map level→file để xác nhận wiring đúng (không cần máy thật).
         logRewardVideoFilePlan('[RewardVideo][Boot]');
         console.log('[RewardVideo][Boot] Token endpoint =', REWARD_VIDEO_TOKEN_URL);
-            console.log(
+        console.log(
             '[RewardVideo][Boot] Trigger khi level %',
             REWARD_VIDEO_LEVEL_INTERVAL,
             '=== 0. Cheat Editor: phím T = thắng level hiện tại.',
@@ -323,6 +331,31 @@ export class GameManager extends Component {
         console.log('[Save] Level đã lưu khi mở game =', this.getSavedLevelId());
 
         this.setState(GameState.MAIN_MENU);
+    }
+
+    /** Warm asset nặng sau Splash→Home để không treo splash trên web. */
+    private deferredBootWarmup(): void {
+        void this.runDeferredBootWarmup();
+    }
+
+    private async runDeferredBootWarmup(): Promise<void> {
+        const audioMgr = AudioManager.getInstance();
+        const skinMgr = SkinManager.getInstance();
+        try {
+            await Promise.all([
+                audioMgr?.preloadRemainingAssets() ?? Promise.resolve(),
+                skinMgr?.prewarmSkinSprites() ?? Promise.resolve(),
+                UIManager.getInstance().preloadPanels([
+                    'GameplayPanel',
+                    'LevelCompletePanel',
+                    'LevelFailedPanel',
+                    'LevelSelectPanel',
+                    'RewardVideoGalleryPanel',
+                ]),
+            ]);
+        } catch (err) {
+            console.warn('[Boot] Deferred warmup failed (non-blocking):', err);
+        }
     }
 
     /** Đăng ký tile prefab vào PoolManager */
@@ -486,12 +519,16 @@ export class GameManager extends Component {
             GameManager.Instance = null;
             EventBus.getInstance().off(GameEvent.LEVEL_COMPLETED, this.onLevelCompleted, this);
             EventBus.getInstance().off(GameEvent.LEVEL_FAILED, this.onLevelFailed, this);
+            EventBus.getInstance().off(GameEvent.REWARD_VIDEO_HISTORY_CHANGED, this.refreshClipsButtonLabel, this);
             input.off(Input.EventType.KEY_DOWN, this.onKeyDown, this);
             if (this.levelJumpOk) {
                 this.levelJumpOk.node.off(Button.EventType.CLICK, this.onClickLevelJump, this);
             }
             if (this.playGameButton) {
                 this.playGameButton.node.off(Button.EventType.CLICK, this.onPlayGameClicked, this);
+            }
+            if (this.clipsButton) {
+                this.clipsButton.node.off(Button.EventType.CLICK, this.onClipsButtonClicked, this);
             }
             this.stopPlayButtonPulse();
         }
@@ -508,7 +545,126 @@ export class GameManager extends Component {
         if (this.playGameButton) {
             this.playGameButton.node.on(Button.EventType.CLICK, this.onPlayGameClicked, this);
         }
+        this.bindClipsButton();
         AudioManager.getInstance()?.bindButtonSounds(this.homeScreen);
+    }
+
+    /**
+     * Nút Clip nằm dưới Home, nhưng label Status/UserInfo trên Canvas che hit-test.
+     * Resolve button + đưa lên trên cùng Canvas rồi mới bind CLICK.
+     */
+    private bindClipsButton(): void {
+        if (!this.clipsButton) {
+            const found = this.homeScreen?.getChildByName('BtnClips')?.getComponent(Button)
+                || this.node.getChildByName('BtnClips')?.getComponent(Button)
+                || null;
+            if (found) {
+                this.clipsButton = found;
+                if (!this.clipsButtonLabel) {
+                    this.clipsButtonLabel = found.node.getComponentInChildren(Label);
+                }
+                console.log('[RewardVideo] clipsButton resolve bằng tên BtnClips');
+            }
+        }
+
+        if (!this.clipsButton) {
+            console.warn('[RewardVideo] Chưa gán clipsButton trên GameManager / không tìm thấy BtnClips');
+            return;
+        }
+
+        this.raiseClipsButtonAboveOverlays();
+        this.clipsButton.node.off(Button.EventType.CLICK, this.onClipsButtonClicked, this);
+        this.clipsButton.node.on(Button.EventType.CLICK, this.onClipsButtonClicked, this);
+        console.log('[RewardVideo] Đã bind CLICK cho BtnClips');
+    }
+
+    /** Đưa BtnClips ra Canvas (sau Status) để không bị label debug chặn click. */
+    private raiseClipsButtonAboveOverlays(): void {
+        const btnNode = this.clipsButton?.node;
+        if (!btnNode?.isValid) return;
+
+        const canvas = this.node.parent;
+        if (!canvas?.isValid) return;
+
+        const worldPos = btnNode.worldPosition.clone();
+        if (btnNode.parent !== canvas) {
+            btnNode.setParent(canvas);
+            btnNode.setWorldPosition(worldPos);
+        }
+        btnNode.setSiblingIndex(canvas.children.length - 1);
+        btnNode.layer = canvas.layer;
+        this.setClipsButtonVisible(!!this.homeScreen?.active);
+    }
+
+    private setClipsButtonVisible(visible: boolean): void {
+        if (this.clipsButton?.node?.isValid) {
+            this.clipsButton.node.active = visible;
+        }
+    }
+
+    private async onClipsButtonClicked(): Promise<void> {
+        console.log('[RewardVideo] Click Clip → mở RewardVideoGalleryPanel');
+        await this.waitForInitialization();
+        const panel = await UIManager.getInstance().openPanel('RewardVideoGalleryPanel');
+        if (!panel) {
+            console.warn(
+                '[RewardVideo] Không mở được panel_clips qua UIManager. Thử fallback runtime...',
+            );
+            this.openClipsGalleryFallback();
+            return;
+        }
+        // PopupLayer nằm trong GameScreen — khi đang Home thì GameScreen inactive → panel "mở" nhưng không thấy.
+        this.mountPanelOnHomeVisibleRoot(panel.node);
+        console.log('[RewardVideo] Đã mở gallery clip (prefab) trên Canvas/Home root.');
+    }
+
+    /**
+     * Gắn panel lên root luôn visible trên Home (Canvas), không để dưới GameScreen/UI.
+     */
+    private mountPanelOnHomeVisibleRoot(panelNode: Node): void {
+        if (!panelNode?.isValid) return;
+        const canvas = this.node.parent;
+        const parent = canvas?.isValid ? canvas : this.node;
+        panelNode.setParent(parent);
+        panelNode.setPosition(0, 0, 0);
+        panelNode.layer = parent.layer;
+        panelNode.active = true;
+        panelNode.setSiblingIndex(parent.children.length - 1);
+
+        // Bảo đảm content không bị kẹt scale 0 nếu tween show bị skip khi parent inactive.
+        const panel = panelNode.getComponent(RewardVideoGalleryPanel);
+        if (panel?.contentNode?.isValid) {
+            panel.contentNode.setScale(1, 1, 1);
+            panel.contentNode.active = true;
+        }
+        if (panel?.backgroundBlocker?.isValid) {
+            panel.backgroundBlocker.active = true;
+        }
+    }
+
+    /** Fallback khi prefab Missing Script / load fail: tạo panel runtime trên Canvas. */
+    private openClipsGalleryFallback(): void {
+        const canvas = this.node.parent;
+        const parent = canvas?.isValid ? canvas : this.node;
+        let panel = RewardVideoGalleryPanel.Instance;
+        if (!panel || !panel.node?.isValid) {
+            const node = new Node('RewardVideoGalleryPanel');
+            node.layer = parent.layer;
+            node.addComponent(UITransform);
+            node.setParent(parent);
+            node.setPosition(0, 0, 0);
+            panel = node.addComponent(RewardVideoGalleryPanel);
+        }
+        panel.initialize(UIManager.getInstance());
+        panel.show();
+        this.mountPanelOnHomeVisibleRoot(panel.node);
+        console.log('[RewardVideo] Đã mở gallery clip (fallback runtime).');
+    }
+
+    private refreshClipsButtonLabel(): void {
+        if (!this.clipsButtonLabel) return;
+        const count = RewardVideoHistory.getInstance().getCount();
+        this.clipsButtonLabel.string = count > 0 ? `Clip (${count})` : 'Clip';
     }
 
     /** Hiệu ứng zoom in/out lặp lại để gợi ý người chơi bấm Play */
@@ -544,7 +700,7 @@ export class GameManager extends Component {
         const levelId = this.getSavedLevelId();
 
         await this.waitForInitialization();
-        await this.ensureHomeLevelPrepared(levelId);
+        UIManager.getInstance()?.showLoading('Đang vào game...');
 
         await Promise.all([
             this.transitionToGame(),
@@ -558,7 +714,7 @@ export class GameManager extends Component {
     }
 
     private async runHomeGameplayPreload(): Promise<void> {
-        await this.ensureHomeLevelPrepared(this.getSavedLevelId());
+        await LevelManager.getInstance().preloadLevelRuntime(this.getSavedLevelId());
     }
 
     private getSavedLevelId(): number {
@@ -581,8 +737,10 @@ export class GameManager extends Component {
         if (!this.homeScreen?.active) return;
 
         this._postInitHomeStarted = true;
-        AudioManager.getInstance()?.playRandomMainMusic();
+        // Music tự load 1 BGM khi play; phần còn lại warm nền.
+        void AudioManager.getInstance()?.playRandomMainMusic();
         AudioManager.getInstance()?.bindButtonSounds(this.homeScreen);
+        this.deferredBootWarmup();
         this.preloadHomeGameplayAssets();
     }
 
@@ -736,11 +894,14 @@ export class GameManager extends Component {
 
     private transitionToGame(): Promise<void> {
         this.stopPlayButtonPulse();
+        this.setClipsButtonVisible(false);
         return this.transitionScreens(this.homeScreen, this.gameScreen);
     }
 
     private async transitionToHome(): Promise<void> {
         await this.transitionScreens(this.gameScreen, this.homeScreen);
+        this.setClipsButtonVisible(true);
+        this.raiseClipsButtonAboveOverlays();
         AudioManager.getInstance()?.playRandomMainMusic();
         AudioManager.getInstance()?.bindButtonSounds(this.homeScreen);
         this.startPlayButtonPulse();

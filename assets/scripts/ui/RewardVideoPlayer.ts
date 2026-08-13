@@ -13,7 +13,10 @@ import {
     Widget,
     view,
 } from 'cc';
+import { EventBus } from '../core/EventBus';
+import { GameEvent } from '../enums/GameEvent';
 import { AudioManager } from '../managers/AudioManager';
+import { RewardVideoHistory } from '../services/RewardVideoHistory';
 import { REWARD_VIDEO_TOKEN_URL } from '../TeviConstants';
 import { TeviLoginManager } from '../TeviLoginManager';
 
@@ -56,6 +59,8 @@ export class RewardVideoPlayer extends Component {
     private _hasStartedPlaying: boolean = false;
     /** URL video tạm gần nhất để in log/debug. */
     private _lastVideoUrl: string = '';
+    /** Level mốc tương ứng clip đang phát (để lưu local khi xem được). */
+    private _currentLevelId: number = 0;
 
     protected onLoad(): void {
         if (RewardVideoPlayer.Instance && RewardVideoPlayer.Instance !== this) {
@@ -85,21 +90,28 @@ export class RewardVideoPlayer extends Component {
      * Mở popup và phát video thưởng.
      * @param videoFile Tên object trên R2, ví dụ `vn_reward_lv05.mp4`.
      * @param onClosedCallback Gọi đúng một lần khi đóng (xem hết hoặc bấm X).
+     * @param levelId Level mốc (5/10/15...) — dùng lưu local sau khi video đã PLAYING.
      */
-    public playSecretVideo(videoFile: string, onClosedCallback?: () => void): void {
+    public playSecretVideo(
+        videoFile: string,
+        onClosedCallback?: () => void,
+        levelId?: number,
+    ): void {
         console.log('[RewardVideoPlayer] playSecretVideo() called', {
             videoFile,
+            levelId: levelId ?? 0,
             tokenUrl: REWARD_VIDEO_TOKEN_URL,
             plannedBody: { file: videoFile },
             hasTeviToken: !!(TeviLoginManager.Instance?.getUserToken()?.trim()),
         });
-        void this.loadAndPlaySecretVideo(videoFile, onClosedCallback);
+        void this.loadAndPlaySecretVideo(videoFile, onClosedCallback, levelId);
     }
 
     /** Xin URL tạm từ Worker rồi mới phát, không giữ URL R2 trong game. */
     private async loadAndPlaySecretVideo(
         videoFile: string,
         onClosedCallback?: () => void,
+        levelId?: number,
     ): Promise<void> {
         this.ensureUi();
         if (!this.videoPlayer || !this.videoContainer) {
@@ -123,12 +135,18 @@ export class RewardVideoPlayer extends Component {
         this._isClosing = false;
         this._isPlaying = true;
         this._hasStartedPlaying = false;
+        this._currentLevelId = Math.floor(levelId || 0);
         const requestId = ++this._loadRequestId;
 
         this.pauseGameAudio();
         this.applyFitWidthLayout();
 
         this.videoContainer.active = true;
+        // Đưa cả player + container lên trên cùng (trên nút Clip / HUD khác).
+        const sceneParent = this.node.parent;
+        if (sceneParent) {
+            this.node.setSiblingIndex(sceneParent.children.length - 1);
+        }
         const parent = this.videoContainer.parent;
         if (parent) {
             this.videoContainer.setSiblingIndex(parent.children.length - 1);
@@ -394,8 +412,11 @@ export class RewardVideoPlayer extends Component {
     private closeInternal(invokeCallback: boolean): void {
         if (this._isClosing) return;
         this._isClosing = true;
+        const didWatch = this._hasStartedPlaying;
+        const levelId = this._currentLevelId;
         this._isPlaying = false;
         this._hasStartedPlaying = false;
+        this._currentLevelId = 0;
         this._loadRequestId++;
         this.unscheduleAllCallbacks();
 
@@ -417,6 +438,12 @@ export class RewardVideoPlayer extends Component {
         const callback = this._onClosedCallback;
         this._onClosedCallback = null;
         this._isClosing = false;
+
+        // Chỉ lưu khi video đã thực sự PLAYING (xem hết hoặc bấm X giữa chừng).
+        if (invokeCallback && didWatch && levelId > 0) {
+            RewardVideoHistory.getInstance().markWatched(levelId);
+            EventBus.getInstance().emit(GameEvent.REWARD_VIDEO_HISTORY_CHANGED, levelId);
+        }
 
         if (invokeCallback) {
             callback?.();

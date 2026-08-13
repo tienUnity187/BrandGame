@@ -25,24 +25,35 @@ const SAME_LAYER_GAP_Y = 10;
 const LARGE_TILE_PACK = MAX_TILE_W >= 180 || MAX_TILE_H >= 190;
 
 function boostersFor(idx) {
-  if (idx < 5) {
+  if (idx < 10) {
+    return { HINT: 3, UNDO: 3, SKIP: 0 };
+  }
+  if (idx < 20) {
     return { HINT: 3, UNDO: 3, SKIP: 0 };
   }
 
-  // Safety net scales with level length/traps, but remains scarce enough for monetization.
+  // Casual pack: keep a gentle safety net without making later levels punishing.
   return {
-    HINT: Math.min(4, 2 + Math.floor(idx / 15)),
-    UNDO: Math.min(4, 2 + Math.floor(idx / 18)),
+    HINT: Math.min(4, 2 + Math.floor(idx / 20)),
+    UNDO: Math.min(4, 2 + Math.floor(idx / 22)),
     SKIP: 0,
   };
 }
 
+function orderPatternBand(idx) {
+  // Levels 1-10: AAA (3 identical).
+  // Levels 11-20: AAB (2 identical + 1 different).
+  // Levels 21+: ABC (3 different), but overall board/traps stay easy.
+  if (idx < 10) return 'AAA';
+  if (idx < 20) return 'AAB';
+  return 'ABC';
+}
+
 function groupSpanFor(idx) {
-  // A wider pool in the tutorial prevents several selectable tiles from
-  // sharing the requested icon and removes accidental same-item traps.
-  if (idx < 5) return Math.min(GROUPS.length, 18);
-  if (idx < 12) return Math.min(GROUPS.length, 14);
-  if (idx < 22) return Math.min(GROUPS.length, 18);
+  // Keep early pools modest so same-item orders stay readable on board.
+  if (idx < 10) return Math.min(GROUPS.length, 10);
+  if (idx < 20) return Math.min(GROUPS.length, 12);
+  if (idx < 35) return Math.min(GROUPS.length, 16);
   return GROUPS.length;
 }
 const COVER_THRESHOLD = 0;
@@ -259,16 +270,29 @@ function componentCount(cells) {
 }
 
 function targetTiles(idx) {
-  const progressiveTarget = 18 + 3 * Math.floor(idx / 3);
-  // Four layers across a 12-cell late-game silhouette still provide 48 tiles,
-  // while leaving room for varied shapes instead of forcing one dense layout.
-  return Math.min(idx >= 29 ? 48 : 54, progressiveTarget);
+  // Gentler growth so all 50 levels stay casual / low-retry.
+  // Orders are always size 3, so tile counts must stay divisible by 3.
+  const progressiveTarget = 15 + 2 * Math.floor(idx / 3);
+  const capped = Math.min(idx >= 29 ? 42 : 48, progressiveTarget);
+  return Math.max(15, capped - (capped % 3));
+}
+
+function trimTilesToOrderMultiple(tiles) {
+  if (tiles.length % 3 === 0) return tiles;
+  const removable = [...tiles].sort((a, b) =>
+    a.layer - b.layer ||
+    a.gridY - b.gridY ||
+    a.gridX - b.gridX ||
+    a.id.localeCompare(b.id)
+  );
+  const removeCount = tiles.length % 3;
+  const dropIds = new Set(removable.slice(0, removeCount).map(t => t.id));
+  return tiles.filter(t => !dropIds.has(t.id));
 }
 function maxLayersFor(idx) {
-  if (idx < 6) return 3;
-  // Keep late boards readable without reducing their tile/trap difficulty.
-  if (idx >= 29) return 4;
-  return idx < 18 ? 4 : 5;
+  if (idx < 12) return 3;
+  // Never go to 5 layers in the casual pack — keeps silhouettes readable.
+  return 4;
 }
 
 function layerJitter(layer, axis, config) {
@@ -537,9 +561,9 @@ function computeBlockStatus(tiles, config) {
 function buildOrderPermutation(moveCount, idx) {
   const perm = [];
   let i = 0;
-  // Levels 1-5 follow the natural selectable path so new players never need
-  // to pick a wrong "unlocker" tile between required order items.
-  const shouldInterleave = idx >= 5;
+  // Casual pack: keep natural clear order until late levels so players rarely
+  // need "unlocker" taps between order items.
+  const shouldInterleave = idx >= 35;
   while (i < moveCount) {
     if (shouldInterleave && i + 5 < moveCount) {
       perm.push(i, i + 2, i + 3, i + 1, i + 4, i + 5);
@@ -638,11 +662,18 @@ function isSelectableAfterRemoving(activeIds, removeId, targetId, byId, config) 
   return selectable(activeTiles, config).some(t => t.id === targetId);
 }
 
-function wouldCreateBadOrder(sequence, rank, tile, newGroupId) {
+function wouldCreateBadOrder(sequence, rank, tile, newGroupId, idx = 20) {
   const orderIndex = Math.floor(rank.get(tile.id) / 3);
   const orderStart = orderIndex * 3;
   const items = sequence.slice(orderStart, orderStart + 3).map(t => t.id === tile.id ? newGroupId : t.groupId);
-  if (items.length === 3 && new Set(items).size === 1) return true;
+  if (items.length === 3) {
+    const unique = new Set(items).size;
+    const band = orderPatternBand(idx);
+    // Protect the intended order pattern band when decoys rewrite tile groups.
+    if (band === 'AAA' && unique !== 1) return true;
+    if (band === 'AAB' && unique !== 2) return true;
+    if (band === 'ABC' && unique < 3) return true;
+  }
 
   const prev = orderIndex > 0 ? sequence.slice(orderStart - 3, orderStart).map(t => t.groupId).join(',') : '';
   const next = sequence.slice(orderStart + 3, orderStart + 6).map(t => t.groupId).join(',');
@@ -654,25 +685,23 @@ function addDecoys(tiles, sequence, idx, board) {
   const byId = new Map(tiles.map(t => [t.id, t]));
   const rank = new Map(sequence.map((t, i) => [t.id, i]));
   const active = new Set(tiles.map(t => t.id));
-  const limit = Math.min(sequence.length - 5, idx < 6 ? 4 : 7 + Math.floor(idx * 0.7));
+  const limit = Math.min(sequence.length - 5, idx < 10 ? 0 : idx < 20 ? 4 : 6 + Math.floor(idx * 0.35));
   const totalCap = Math.min(
     sequence.length - 3,
-    idx < 6 ? 0 :
-      idx < 12 ? Math.max(2, Math.floor(sequence.length * 0.12)) :
-        idx < 22 ? Math.max(7, Math.floor(sequence.length * 0.34)) :
-          idx < 34 ? Math.max(11, Math.floor(sequence.length * 0.42)) :
-            Math.max(15, Math.floor(sequence.length * 0.5))
+    idx < 10 ? 0 :
+      idx < 20 ? Math.max(1, Math.floor(sequence.length * 0.06)) :
+        idx < 35 ? Math.max(3, Math.floor(sequence.length * 0.14)) :
+          Math.max(5, Math.floor(sequence.length * 0.22))
   );
-  const perFutureOrderTargetCap = idx < 12 ? 1 : idx < 22 ? 2 : idx < 38 ? 3 : 4;
+  const perFutureOrderTargetCap = idx < 20 ? 1 : idx < 35 ? 1 : 2;
   const futureOrderTargetCounts = new Map();
   let decoyCount = 0;
 
   const desiredChoiceCount = (step) => {
-    if (idx < 6) return 1;
-    if (idx < 12) return 1 + (step >= 6 && step % 4 === 0 ? 1 : 0);
-    if (idx < 22) return 2 + (step % 3 === 0 ? 1 : 0);
-    if (idx < 34) return 3 + (step % 2 === 0 ? 1 : 0);
-    return 4 + (step % 3 === 0 ? 1 : 0);
+    if (idx < 10) return 1;
+    if (idx < 20) return 1 + (step >= 8 && step % 5 === 0 ? 1 : 0);
+    if (idx < 35) return 1 + (step % 4 === 0 ? 1 : 0);
+    return 2 + (step % 3 === 0 ? 1 : 0);
   };
 
   for (let step = 0; step < limit; step++) {
@@ -718,7 +747,7 @@ function addDecoys(tiles, sequence, idx, board) {
         if (used.has(decoy.id)) continue;
         used.add(decoy.id);
         if (decoy.id === chosen.id) continue;
-        if (wouldCreateBadOrder(sequence, rank, decoy, chosen.groupId)) continue;
+        if (wouldCreateBadOrder(sequence, rank, decoy, chosen.groupId, idx)) continue;
         decoy.groupId = chosen.groupId;
         decoy.strategyRole = picked.immediateTrap ? 'critical_path_decoy' : 'same_item_path_decoy';
         decoy.decoyForStep = step + 1;
@@ -737,8 +766,8 @@ function addOpeningAmbiguity(tiles, sequence, idx, board) {
   const rank = new Map(sequence.map((t, i) => [t.id, i]));
   const openingTiles = selectable(tiles, board).filter(t => rank.get(t.id) > 2);
   const used = new Set(tiles.filter(t => t.strategyRole).map(t => t.id));
-  const totalCap = idx < 6 ? 0 : idx < 12 ? 2 : idx < 22 ? 6 : idx < 34 ? 9 : 12;
-  const desired = idx < 6 ? 1 : idx < 12 ? 2 : idx < 22 ? 3 : idx < 34 ? 4 : 5;
+  const totalCap = idx < 10 ? 0 : idx < 20 ? 1 : idx < 35 ? 3 : 5;
+  const desired = idx < 10 ? 1 : idx < 20 ? 1 : idx < 35 ? 2 : 3;
   let changes = 0;
 
   for (let step = 0; step < Math.min(10, sequence.length - 3) && changes < totalCap; step++) {
@@ -753,7 +782,7 @@ function addOpeningAmbiguity(tiles, sequence, idx, board) {
 
     for (const decoy of candidates) {
       if (needed <= 0 || changes >= totalCap) break;
-      if (wouldCreateBadOrder(sequence, rank, decoy, chosen.groupId)) continue;
+      if (wouldCreateBadOrder(sequence, rank, decoy, chosen.groupId, idx)) continue;
       decoy.groupId = chosen.groupId;
       decoy.strategyRole = 'opening_same_item_decoy';
       decoy.decoyForStep = step + 1;
@@ -785,9 +814,20 @@ function validate(level) {
   if (level.tiles.length !== level.orders.reduce((s, o) => s + o.items.length, 0)) errors.push('order count mismatch');
   const allowDisconnectedShape = /parallel|lane|cluster/i.test(level.board.shapeName ?? '');
   if (!allowDisconnectedShape && componentCount(cellsFromPattern(level.board.shapePattern)) !== 1) errors.push('shape disconnected');
+  const difficultyIdx = Number.isFinite(level.difficultyMetrics?.difficultyIndex)
+    ? level.difficultyMetrics.difficultyIndex - 1
+    : Math.max(0, (level.levelId || START) - START);
+  const band = orderPatternBand(difficultyIdx);
   for (let i = 0; i < level.orders.length; i++) {
     const items = level.orders[i].items;
-    if (new Set(items).size === 1) errors.push(`monotone order ${i + 1}: ${items.join('-')}`);
+    const unique = new Set(items).size;
+    if (band === 'AAA' && unique !== 1) {
+      errors.push(`expected AAA order ${i + 1}: ${items.join('-')}`);
+    } else if (band === 'AAB' && unique !== 2) {
+      errors.push(`expected AAB order ${i + 1}: ${items.join('-')}`);
+    } else if (band === 'ABC' && unique < 3) {
+      errors.push(`expected ABC order ${i + 1}: ${items.join('-')}`);
+    }
     if (i > 0 && items.join(',') === level.orders[i - 1].items.join(',')) {
       errors.push(`repeated adjacent order ${i + 1}: ${items.join('-')}`);
     }
@@ -1042,8 +1082,13 @@ function makeLevel(shapeIdx, difficultyIdx = shapeIdx) {
       });
     }
   }
-  if (idx >= 29 && tiles.length < target) {
-    throw new Error(`shape ${shapeName} only fits ${tiles.length}/${target} tiles with 4 layers`);
+  // Keep every level solvable as complete 3-item orders.
+  tiles.splice(0, tiles.length, ...trimTilesToOrderMultiple(tiles));
+  if (tiles.length < 12 || tiles.length % 3 !== 0) {
+    throw new Error(`level ${levelId} invalid:\nshape ${shapeName} cannot form complete orders (${tiles.length} tiles)`);
+  }
+  if (idx >= 29 && tiles.length < Math.min(target, 30)) {
+    throw new Error(`level ${levelId} invalid:\nshape ${shapeName} only fits ${tiles.length}/${target} tiles with 4 layers`);
   }
 
   const cols = shapeRows[0].length;
@@ -1076,15 +1121,21 @@ function makeLevel(shapeIdx, difficultyIdx = shapeIdx) {
   recenter(board, tiles);
 
   const sequence = solutionOrder(tiles, board, idx);
+  if (sequence.length !== tiles.length || sequence.length % 3 !== 0) {
+    throw new Error(`level ${levelId} invalid:\nunsolvable or incomplete solution path (${sequence.length}/${tiles.length})`);
+  }
   const groupSpan = groupSpanFor(idx);
-  const assignedGroups = [];
+  const band = orderPatternBand(idx);
+  const orderBases = [];
+  const orderSeconds = [];
+  const orderThirds = [];
   const orderPermutation = buildOrderPermutation(sequence.length, idx);
   for (let p = 0; p < orderPermutation.length; p++) {
     const s = orderPermutation[p];
     const orderIndex = Math.floor(p / 3);
     const itemIndex = p % 3;
     const tile = sequence[s];
-    let gid = (
+    const seed = (
       idx * 11 +
       orderIndex * 7 +
       itemIndex * 5 +
@@ -1094,19 +1145,69 @@ function makeLevel(shapeIdx, difficultyIdx = shapeIdx) {
       tile.layer * 7
     ) % groupSpan;
 
-    // Avoid low-effort orders like A-A-B or repeating the exact previous order.
-    while (itemIndex > 0 && gid === assignedGroups[s - 1]) gid = (gid + 1) % groupSpan;
-    if (itemIndex === 2 && gid === assignedGroups[s - 2]) gid = (gid + 2) % groupSpan;
-    if (orderIndex > 0 && itemIndex === 2) {
-      const prev = assignedGroups.slice(s - 5, s - 2).join(',');
-      let current = [assignedGroups[s - 2], assignedGroups[s - 1], gid].join(',');
-      while (current === prev) {
-        gid = (gid + 3) % groupSpan;
-        current = [assignedGroups[s - 2], assignedGroups[s - 1], gid].join(',');
+    let gid = seed;
+    if (itemIndex === 0) {
+      gid = seed;
+      if (orderIndex > 0) {
+        // Keep consecutive orders from becoming identical in every band.
+        while (
+          gid === orderBases[orderIndex - 1] &&
+          (band === 'AAA' || groupSpan > 1)
+        ) {
+          gid = (gid + 1) % groupSpan;
+          if (gid === seed) break;
+        }
+      }
+      orderBases[orderIndex] = gid;
+    } else if (band === 'AAA') {
+      gid = orderBases[orderIndex];
+    } else if (band === 'AAB') {
+      if (itemIndex === 1) {
+        gid = orderBases[orderIndex];
+      } else {
+        gid = (orderBases[orderIndex] + 1 + (orderIndex % Math.max(1, groupSpan - 1))) % groupSpan;
+        if (gid === orderBases[orderIndex]) gid = (gid + 1) % groupSpan;
+        if (orderIndex > 0) {
+          const prev = [orderBases[orderIndex - 1], orderBases[orderIndex - 1], orderSeconds[orderIndex - 1]].join(',');
+          let current = [orderBases[orderIndex], orderBases[orderIndex], gid].join(',');
+          let guard = 0;
+          while (current === prev && guard++ < groupSpan) {
+            gid = (gid + 1) % groupSpan;
+            if (gid === orderBases[orderIndex]) gid = (gid + 1) % groupSpan;
+            current = [orderBases[orderIndex], orderBases[orderIndex], gid].join(',');
+          }
+        }
+        orderSeconds[orderIndex] = gid;
+      }
+    } else {
+      // ABC: three distinct items, still easier boards via reduced traps/layers.
+      if (itemIndex === 1) {
+        gid = (orderBases[orderIndex] + 1 + (seed % Math.max(1, groupSpan - 1))) % groupSpan;
+        if (gid === orderBases[orderIndex]) gid = (gid + 1) % groupSpan;
+        orderSeconds[orderIndex] = gid;
+      } else {
+        gid = (orderBases[orderIndex] + 2 + (seed % Math.max(1, groupSpan - 1))) % groupSpan;
+        let guard = 0;
+        while (
+          (gid === orderBases[orderIndex] || gid === orderSeconds[orderIndex]) &&
+          guard++ < groupSpan
+        ) {
+          gid = (gid + 1) % groupSpan;
+        }
+        if (orderIndex > 0) {
+          const prev = [orderBases[orderIndex - 1], orderSeconds[orderIndex - 1], orderThirds[orderIndex - 1]].join(',');
+          let current = [orderBases[orderIndex], orderSeconds[orderIndex], gid].join(',');
+          guard = 0;
+          while (current === prev && guard++ < groupSpan) {
+            gid = (gid + 1) % groupSpan;
+            if (gid === orderBases[orderIndex] || gid === orderSeconds[orderIndex]) continue;
+            current = [orderBases[orderIndex], orderSeconds[orderIndex], gid].join(',');
+          }
+        }
+        orderThirds[orderIndex] = gid;
       }
     }
 
-    assignedGroups[p] = gid;
     sequence[s].groupId = GROUPS[gid];
   }
   addDecoys(tiles, sequence, idx, board);
@@ -1134,7 +1235,7 @@ function makeLevel(shapeIdx, difficultyIdx = shapeIdx) {
     orderConfig: {
       orderSize: 3,
       orderMode: 'EXACT_ORDER',
-      wrongTrayMaxSlots: idx < 5 ? 3 : 1,
+      wrongTrayMaxSlots: idx < 15 ? 3 : idx < 30 ? 2 : 1,
       consumeWrongTile: true,
     },
     orders,
@@ -1142,7 +1243,10 @@ function makeLevel(shapeIdx, difficultyIdx = shapeIdx) {
     solutionMoveTileIds,
     tiles,
     starThresholds: [0, 500, 1000],
-    difficultyMetrics: {},
+    difficultyMetrics: {
+      difficultyIndex: idx + 1,
+      orderPatternBand: band,
+    },
   };
 
   const result = validate(level);
@@ -1157,9 +1261,10 @@ function makeLevel(shapeIdx, difficultyIdx = shapeIdx) {
   const relaxedLayerVisibility = difficultyIdx < EARLY_PRESET_SHAPES.length;
 
   level.difficultyMetrics = {
-    designType: 'handcrafted_progressive_order_match_120x144_v5_visible_layers',
-    difficultyBand: idx < 10 ? 'tutorial_plus' : idx < 22 ? 'easy_mid' : idx < 34 ? 'advanced' : idx < 44 ? 'expert' : 'master',
+    designType: 'casual_order_match_aaa_aab_abc_v1_visible_layers',
+    difficultyBand: idx < 10 ? 'tutorial_aaa' : idx < 20 ? 'easy_aab' : idx < 35 ? 'casual_abc' : 'casual_late',
     difficultyIndex: idx + 1,
+    orderPatternBand: band,
     shapeName,
     totalTiles: tiles.length,
     orderCount: orders.length,
@@ -1219,7 +1324,7 @@ function progressiveScore(level) {
 }
 
 function difficultyBandForIndex(idx) {
-  return idx < 10 ? 'tutorial_plus' : idx < 20 ? 'easy_mid' : idx < 32 ? 'advanced' : idx < 42 ? 'expert' : 'master';
+  return idx < 10 ? 'tutorial_aaa' : idx < 20 ? 'easy_aab' : idx < 35 ? 'casual_abc' : 'casual_late';
 }
 
 function renumberLevel(level, idx) {
@@ -1243,6 +1348,7 @@ function renumberLevel(level, idx) {
   level.solutionMoveTileIds = level.solutionMoveTileIds.map(id => idMap.get(id) ?? id);
   level.difficultyMetrics.difficultyIndex = difficultyIdx + 1;
   level.difficultyMetrics.difficultyBand = difficultyBandForIndex(difficultyIdx);
+  level.difficultyMetrics.orderPatternBand = orderPatternBand(difficultyIdx);
   level.difficultyMetrics.progressiveDifficultyScore = progressiveScore(level);
   for (const tile of level.tiles) tile.active = true;
   computeBlockStatus(level.tiles, level.board);
@@ -1255,9 +1361,9 @@ function renumberLevel(level, idx) {
 const signatures = new Set();
 const summary = [];
 const levels = [];
-// Keep handcrafted early order only for short tutorial packs; long packs sort by difficulty.
+// Keep progressive AAA→AAB→ABC bands in level order for the casual 1-50 pack.
 const preserveGenerationOrder = process.env.PRESERVE_GENERATION_ORDER === '1'
-  || (process.env.PRESERVE_GENERATION_ORDER !== '0' && START <= 20 && COUNT > 0 && COUNT <= 8);
+  || (process.env.PRESERVE_GENERATION_ORDER !== '0' && START <= 50 && COUNT > 0 && COUNT <= 50);
 const allowDuplicateShapes = LARGE_TILE_PACK || COUNT > ACTIVE_SHAPES.length + EARLY_PRESET_SHAPES.length;
 
 const desiredCount = COUNT > 0 ? COUNT : ACTIVE_SHAPES.length;
@@ -1268,7 +1374,12 @@ for (let idx = 0; idx < desiredCount * 80 && levels.length < desiredCount; idx++
   } catch (err) {
     if (process.env.DEBUG_GENERATOR === '1') {
       console.error(`[gen] skip/fail idx=${idx}:`, err.message || err);
-      if (!String(err.message || err).includes('same-layer') && !String(err.message || err).includes('screen fit') && !String(err.message || err).includes('invalid')) {
+      if (
+        !String(err.message || err).includes('same-layer') &&
+        !String(err.message || err).includes('screen fit') &&
+        !String(err.message || err).includes('invalid') &&
+        !String(err.message || err).includes('only fits')
+      ) {
         throw err;
       }
     }

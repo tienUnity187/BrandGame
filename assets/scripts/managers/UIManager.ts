@@ -1,4 +1,4 @@
-import { _decorator, Component, Node, instantiate, Prefab, UITransform } from 'cc';
+import { _decorator, BlockInputEvents, Color, Component, Graphics, Label, Layers, Node, UITransform, Widget, instantiate, Prefab, view } from 'cc';
 import { SkinManager } from './SkinManager';
 import { BasePanel } from '../ui/BasePanel';
 import { AudioManager } from './AudioManager';
@@ -28,6 +28,7 @@ export class UIManager extends Component {
     private _panelStack: string[] = [];
     private _prefabCache: Map<string, Prefab> = new Map();
     private _loadingNode: Node | null = null;
+    private _loadingLabel: Label | null = null;
 
     protected onLoad(): void {
         if (UIManager.Instance) { this.destroy(); return; }
@@ -103,6 +104,9 @@ export class UIManager extends Component {
             return panel;
         }
 
+        console.warn(
+            `[UIManager] Prefab "${panelName}" thiếu BasePanel (Missing Script?). Node bị hủy.`,
+        );
         node.destroy();
         return null;
     }
@@ -153,23 +157,68 @@ export class UIManager extends Component {
     }
 
     /** Hiển thị loading overlay (tạo programmatically) */
-    public showLoading(_message: string = 'Loading...'): void {
+    public showLoading(message: string = 'Loading...'): void {
         this.prepareLoadingOverlay();
         if (!this._loadingNode) return;
+        if (this._loadingLabel) {
+            this._loadingLabel.string = message;
+        }
         this._loadingNode.active = true;
+        const parent = this._loadingNode.parent;
+        if (parent) {
+            this._loadingNode.setSiblingIndex(parent.children.length - 1);
+        }
     }
 
     private prepareLoadingOverlay(): void {
         if (this._loadingNode && this._loadingNode.isValid) return;
+
+        const design = view.getDesignResolutionSize();
+        const width = design.width || 1080;
+        const height = design.height || 1920;
+
         const overlay = new Node('LoadingOverlay');
-        overlay.layer = this.uiRoot?.layer ?? this.node.layer;
-        overlay.addComponent(UITransform);
+        overlay.layer = this.popupLayer?.layer ?? this.uiRoot?.layer ?? Layers.Enum.UI_2D;
+        overlay.addComponent(BlockInputEvents);
+
+        const transform = overlay.addComponent(UITransform);
+        transform.setContentSize(width, height);
 
         const parent = this.popupLayer || this.uiRoot || this.node;
         overlay.setParent(parent);
+
+        const widget = overlay.addComponent(Widget);
+        widget.isAlignTop = widget.isAlignBottom = widget.isAlignLeft = widget.isAlignRight = true;
+        widget.top = widget.bottom = widget.left = widget.right = 0;
+        widget.alignMode = Widget.AlignMode.ON_WINDOW_RESIZE;
+
+        const bg = new Node('Bg');
+        bg.layer = overlay.layer;
+        bg.setParent(overlay);
+        const bgTransform = bg.addComponent(UITransform);
+        bgTransform.setContentSize(width, height);
+        const bgGfx = bg.addComponent(Graphics);
+        bgGfx.fillColor = new Color(0, 0, 0, 180);
+        bgGfx.rect(-width * 0.5, -height * 0.5, width, height);
+        bgGfx.fill();
+
+        const labelNode = new Node('Label');
+        labelNode.layer = overlay.layer;
+        labelNode.setParent(overlay);
+        const labelTransform = labelNode.addComponent(UITransform);
+        labelTransform.setContentSize(width - 80, 120);
+        labelNode.setPosition(0, 0, 0);
+        this._loadingLabel = labelNode.addComponent(Label);
+        this._loadingLabel.string = 'Loading...';
+        this._loadingLabel.fontSize = 36;
+        this._loadingLabel.lineHeight = 44;
+        this._loadingLabel.color = Color.WHITE;
+        this._loadingLabel.horizontalAlign = Label.HorizontalAlign.CENTER;
+        this._loadingLabel.verticalAlign = Label.VerticalAlign.CENTER;
+        this._loadingLabel.enableWrapText = true;
+
         overlay.setPosition(0, 0, 999);
         overlay.active = false;
-
         this._loadingNode = overlay;
     }
 

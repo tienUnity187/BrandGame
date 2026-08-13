@@ -14,4 +14,5 @@ export enum UIPanelType {
     SHOP = 8,
     BOOSTER_CONFIRM = 9,
     TUTORIAL = 10,
+    REWARD_VIDEO_GALLERY = 11,
 }

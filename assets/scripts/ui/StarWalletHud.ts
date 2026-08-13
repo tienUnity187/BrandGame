@@ -15,9 +15,9 @@ import {
 import { EDITOR, PREVIEW } from 'cc/env';
 import { EventBus } from '../core/EventBus';
 import { GameEvent } from '../enums/GameEvent';
-import { STAR_TOPUP_PACKS } from '../TeviConstants';
+import { APP_ID, STAR_TOPUP_PACKS, VERSION } from '../TeviConstants';
 import { StarWallet } from '../services/StarWallet';
-import { TeviPaymentService } from '../services/TeviPaymentService';
+import { TeviPaymentService, PurchasePackOptions } from '../services/TeviPaymentService';
 import { TeviLoginManager } from '../TeviLoginManager';
 
 const { ccclass } = _decorator;
@@ -32,8 +32,16 @@ export class StarWalletHud extends Component {
     private _balanceLabel: Label | null = null;
     private _statusLabel: Label | null = null;
     private _shopRoot: Node | null = null;
+    private _waitingRoot: Node | null = null;
+    private _waitingLabel: Label | null = null;
+    private _pendingBannerRoot: Node | null = null;
+    private _pendingBannerLabel: Label | null = null;
+    private _resultPopupRoot: Node | null = null;
     private _openShopButton: Button | null = null;
     private _built = false;
+    /** Giữ vài dòng status gần nhất — tránh mất JWT.app vì chạy quá nhanh. */
+    private _statusLines: string[] = [];
+    private static readonly STATUS_MAX_LINES = 8;
 
     protected onLoad(): void {
         if (StarWalletHud.Instance && StarWalletHud.Instance !== this) {
@@ -67,13 +75,29 @@ export class StarWalletHud extends Component {
     }
 
     private setStatus(message: string): void {
-        if (this._statusLabel) {
-            this._statusLabel.string = message;
+        const line = `${message}`.trim();
+        if (line) {
+            this._statusLines.push(line);
+            if (this._statusLines.length > StarWalletHud.STATUS_MAX_LINES) {
+                this._statusLines.splice(0, this._statusLines.length - StarWalletHud.STATUS_MAX_LINES);
+            }
         }
-        // Đồng bộ lên label Tevi login để thấy ngay cả khi shop đóng / chụp màn hình.
-        TeviLoginManager.Instance?.setDebugStatus(`Star: ${message}`);
-        TeviLoginManager.Instance?.setDebugUserInfo(message);
+        const joined = this._statusLines.join('\n');
+        if (this._statusLabel) {
+            this._statusLabel.string = joined;
+        }
+        // Dòng cuối (quan trọng nhất / JWT) lên label Tevi để chụp dễ.
+        const last = this._statusLines[this._statusLines.length - 1] || message;
+        TeviLoginManager.Instance?.setDebugStatus(`Star: ${last}`);
+        // Ưu tiên hiện dòng JWT.app nếu còn trong buffer.
+        const jwtLine = [...this._statusLines].reverse().find(l => /JWT\.app=/i.test(l)) || last;
+        TeviLoginManager.Instance?.setDebugUserInfo(jwtLine);
         console.log('[StarWalletHud]', message);
+    }
+
+    private resetStatusLog(seed?: string): void {
+        this._statusLines = [];
+        if (seed) this.setStatus(seed);
     }
 
     private ensureUi(): void {
@@ -117,7 +141,7 @@ export class StarWalletHud extends Component {
         this._balanceLabel.horizontalAlign = Label.HorizontalAlign.CENTER;
         this._balanceLabel.verticalAlign = Label.VerticalAlign.CENTER;
 
-        const openNode = this.createButton(topBar, 'BtnOpenShop', 'Nạp', 120, 56, 110, 0);
+        const openNode = this.createButton(topBar, 'BtnOpenShop', 'Top Up', 120, 56, 110, 0);
         this._openShopButton = openNode.getComponent(Button);
         openNode.on(Button.EventType.CLICK, this.openShop, this);
 
@@ -169,7 +193,7 @@ export class StarWalletHud extends Component {
         titleTransform.setContentSize(560, 64);
         titleNode.setPosition(0, 280, 0);
         const title = titleNode.addComponent(Label);
-        title.string = 'Sandbox Nạp Star';
+        title.string = 'Sandbox Top Up Stars';
         title.fontSize = 40;
         title.lineHeight = 48;
         title.color = Color.WHITE;
@@ -183,8 +207,8 @@ export class StarWalletHud extends Component {
         statusNode.setPosition(0, 210, 0);
         this._statusLabel = statusNode.addComponent(Label);
         this._statusLabel.string = this.isEditorOrPreview()
-            ? 'Editor: gói/Mock đều giả lập. Status từng bước hiện ở đây.'
-            : 'Bản Tevi thật: nạp qua top-up-signature + TeviJS.topup. Status hiện ở đây.';
+            ? 'Editor: packs/Mock are simulated. Step-by-step status appears here.'
+            : 'Tevi build: top up via top-up-signature + TeviJS.topup. Status appears here.';
         this._statusLabel.fontSize = 20;
         this._statusLabel.lineHeight = 26;
         this._statusLabel.overflow = Label.Overflow.RESIZE_HEIGHT;
@@ -219,8 +243,23 @@ export class StarWalletHud extends Component {
             }
         }
 
-        const closeBtn = this.createButton(panel, 'BtnCloseShop', 'Đóng', 200, 64, 0, -300);
+        const clearBtn = this.createButton(panel, 'BtnClearToken', 'Clear Token', 240, 56, 0, -280);
+        const clearLabel = clearBtn.getComponentInChildren(Label);
+        if (clearLabel) clearLabel.fontSize = 24;
+        clearBtn.on(Button.EventType.CLICK, this.onClearTokenClicked, this);
+
+        const closeBtn = this.createButton(panel, 'BtnCloseShop', 'Close', 200, 64, 0, -350);
         closeBtn.on(Button.EventType.CLICK, this.closeShop, this);
+    }
+
+    private onClearTokenClicked(): void {
+        const before = TeviLoginManager.Instance?.getTokenAppId() || '?';
+        TeviLoginManager.Instance?.clearTeviSession(`was JWT.app=${before}`);
+        this.resetStatusLog(
+            `Cleared token (was JWT.app=${before}). Đóng Mini App → mở lại ${APP_ID} trên Tevi → login.`,
+        );
+        // Thử xin token mới ngay nếu bridge còn sống.
+        TeviLoginManager.Instance?.forceReLoginWithPopup();
     }
 
     private createButton(
@@ -266,7 +305,10 @@ export class StarWalletHud extends Component {
     private openShop(): void {
         if (!this._shopRoot) return;
         this._shopRoot.active = true;
-        this.setStatus('Chọn gói Tevi sandbox, hoặc Mock để test offline.');
+        const jwtApp = TeviLoginManager.Instance?.getTokenAppId() || '(chưa login)';
+        this.resetStatusLog(
+            `Shop v${VERSION} | expect APP_ID=${APP_ID} | token JWT.app=${jwtApp}`,
+        );
         this.refreshBalance();
         const parent = this.node.parent;
         if (parent) {
@@ -276,6 +318,240 @@ export class StarWalletHud extends Component {
 
     private closeShop(): void {
         if (this._shopRoot) this._shopRoot.active = false;
+    }
+
+    private bringToFront(): void {
+        const parent = this.node.parent;
+        if (parent) {
+            this.node.setSiblingIndex(parent.children.length - 1);
+        }
+    }
+
+    private ensureWaitingOverlay(): void {
+        if (this._waitingRoot) return;
+
+        const design = view.getDesignResolutionSize();
+        const width = design.width || 1080;
+        const height = design.height || 1920;
+
+        const overlay = new Node('TopUpWaiting');
+        overlay.layer = Layers.Enum.UI_2D;
+        overlay.setParent(this.node);
+        overlay.active = false;
+        overlay.addComponent(BlockInputEvents);
+
+        const transform = overlay.addComponent(UITransform);
+        transform.setContentSize(width, height);
+        const widget = overlay.addComponent(Widget);
+        widget.isAlignTop = widget.isAlignBottom = widget.isAlignLeft = widget.isAlignRight = true;
+        widget.top = widget.bottom = widget.left = widget.right = 0;
+        widget.alignMode = Widget.AlignMode.ON_WINDOW_RESIZE;
+
+        const bgGfx = overlay.addComponent(Graphics);
+        bgGfx.fillColor = new Color(0, 0, 0, 210);
+        bgGfx.rect(-width * 0.5, -height * 0.5, width, height);
+        bgGfx.fill();
+
+        const labelNode = new Node('Label');
+        labelNode.layer = Layers.Enum.UI_2D;
+        labelNode.setParent(overlay);
+        const labelTransform = labelNode.addComponent(UITransform);
+        labelTransform.setContentSize(width - 120, 160);
+        this._waitingLabel = labelNode.addComponent(Label);
+        this._waitingLabel.string = 'Đang xử lý...';
+        this._waitingLabel.fontSize = 34;
+        this._waitingLabel.lineHeight = 42;
+        this._waitingLabel.color = Color.WHITE;
+        this._waitingLabel.horizontalAlign = Label.HorizontalAlign.CENTER;
+        this._waitingLabel.verticalAlign = Label.VerticalAlign.CENTER;
+        this._waitingLabel.enableWrapText = true;
+
+        this._waitingRoot = overlay;
+    }
+
+    private showWaiting(message: string): void {
+        this.ensureWaitingOverlay();
+        if (this._waitingLabel) this._waitingLabel.string = message;
+        if (this._waitingRoot) this._waitingRoot.active = true;
+        this.bringToFront();
+    }
+
+    private hideWaiting(): void {
+        if (this._waitingRoot) this._waitingRoot.active = false;
+    }
+
+    private ensurePendingBanner(): void {
+        if (this._pendingBannerRoot) return;
+
+        const design = view.getDesignResolutionSize();
+        const width = design.width || 1080;
+        const height = design.height || 1920;
+
+        const banner = new Node('TopUpPendingBanner');
+        banner.layer = Layers.Enum.UI_2D;
+        banner.setParent(this.node);
+        banner.active = false;
+
+        const transform = banner.addComponent(UITransform);
+        transform.setContentSize(640, 120);
+        banner.setPosition(0, height * 0.5 - 180, 0);
+
+        const bgGfx = banner.addComponent(Graphics);
+        bgGfx.fillColor = new Color(30, 120, 70, 230);
+        bgGfx.roundRect(-320, -60, 640, 120, 20);
+        bgGfx.fill();
+
+        const labelNode = new Node('Label');
+        labelNode.layer = Layers.Enum.UI_2D;
+        labelNode.setParent(banner);
+        const labelTransform = labelNode.addComponent(UITransform);
+        labelTransform.setContentSize(600, 100);
+        this._pendingBannerLabel = labelNode.addComponent(Label);
+        this._pendingBannerLabel.string = '';
+        this._pendingBannerLabel.fontSize = 28;
+        this._pendingBannerLabel.lineHeight = 34;
+        this._pendingBannerLabel.color = Color.WHITE;
+        this._pendingBannerLabel.horizontalAlign = Label.HorizontalAlign.CENTER;
+        this._pendingBannerLabel.verticalAlign = Label.VerticalAlign.CENTER;
+        this._pendingBannerLabel.enableWrapText = true;
+
+        this._pendingBannerRoot = banner;
+    }
+
+    private showPendingBanner(message: string): void {
+        this.ensurePendingBanner();
+        if (this._pendingBannerLabel) this._pendingBannerLabel.string = message;
+        if (this._pendingBannerRoot) this._pendingBannerRoot.active = true;
+        this.bringToFront();
+    }
+
+    private hidePendingBanner(): void {
+        if (this._pendingBannerRoot) this._pendingBannerRoot.active = false;
+    }
+
+    private ensureResultPopup(): void {
+        if (this._resultPopupRoot) return;
+
+        const design = view.getDesignResolutionSize();
+        const width = design.width || 1080;
+        const height = design.height || 1920;
+
+        const popup = new Node('TopUpResultPopup');
+        popup.layer = Layers.Enum.UI_2D;
+        popup.setParent(this.node);
+        popup.active = false;
+        popup.addComponent(BlockInputEvents);
+
+        const rootTransform = popup.addComponent(UITransform);
+        rootTransform.setContentSize(width, height);
+        const widget = popup.addComponent(Widget);
+        widget.isAlignTop = widget.isAlignBottom = widget.isAlignLeft = widget.isAlignRight = true;
+        widget.top = widget.bottom = widget.left = widget.right = 0;
+        widget.alignMode = Widget.AlignMode.ON_WINDOW_RESIZE;
+
+        const dim = new Node('Dim');
+        dim.layer = Layers.Enum.UI_2D;
+        dim.setParent(popup);
+        const dimTransform = dim.addComponent(UITransform);
+        dimTransform.setContentSize(width, height);
+        const dimGfx = dim.addComponent(Graphics);
+        dimGfx.fillColor = new Color(0, 0, 0, 160);
+        dimGfx.rect(-width * 0.5, -height * 0.5, width, height);
+        dimGfx.fill();
+
+        const panel = new Node('Panel');
+        panel.layer = Layers.Enum.UI_2D;
+        panel.setParent(popup);
+        const panelTransform = panel.addComponent(UITransform);
+        panelTransform.setContentSize(560, 360);
+        const panelGfx = panel.addComponent(Graphics);
+        panelGfx.fillColor = new Color(36, 32, 48, 250);
+        panelGfx.roundRect(-280, -180, 560, 360, 24);
+        panelGfx.fill();
+
+        const titleNode = new Node('Title');
+        titleNode.layer = Layers.Enum.UI_2D;
+        titleNode.setParent(panel);
+        titleNode.setPosition(0, 100, 0);
+        const titleTransform = titleNode.addComponent(UITransform);
+        titleTransform.setContentSize(500, 64);
+        const titleLabel = titleNode.addComponent(Label);
+        titleLabel.string = 'Thông báo';
+        titleLabel.fontSize = 38;
+        titleLabel.lineHeight = 44;
+        titleLabel.color = new Color(255, 220, 90, 255);
+        titleLabel.horizontalAlign = Label.HorizontalAlign.CENTER;
+
+        const bodyNode = new Node('Body');
+        bodyNode.layer = Layers.Enum.UI_2D;
+        bodyNode.setParent(panel);
+        bodyNode.setPosition(0, 10, 0);
+        const bodyTransform = bodyNode.addComponent(UITransform);
+        bodyTransform.setContentSize(500, 140);
+        const bodyLabel = bodyNode.addComponent(Label);
+        bodyLabel.string = '';
+        bodyLabel.fontSize = 30;
+        bodyLabel.lineHeight = 38;
+        bodyLabel.color = Color.WHITE;
+        bodyLabel.horizontalAlign = Label.HorizontalAlign.CENTER;
+        bodyLabel.verticalAlign = Label.VerticalAlign.CENTER;
+        bodyLabel.enableWrapText = true;
+
+        const okBtn = this.createButton(panel, 'BtnOk', 'OK', 220, 64, 0, -120);
+        okBtn.on(Button.EventType.CLICK, () => this.hideResultPopup(), this);
+
+        this._resultPopupRoot = popup;
+    }
+
+    private showResultPopup(title: string, message: string): void {
+        this.ensureResultPopup();
+        if (!this._resultPopupRoot) return;
+
+        const titleLabel = this._resultPopupRoot.getChildByName('Panel')
+            ?.getChildByName('Title')
+            ?.getComponent(Label);
+        const bodyLabel = this._resultPopupRoot.getChildByName('Panel')
+            ?.getChildByName('Body')
+            ?.getComponent(Label);
+        if (titleLabel) titleLabel.string = title;
+        if (bodyLabel) bodyLabel.string = message;
+
+        this._resultPopupRoot.active = true;
+        this.bringToFront();
+    }
+
+    private hideResultPopup(): void {
+        if (this._resultPopupRoot) this._resultPopupRoot.active = false;
+    }
+
+    private buildPurchaseOptions(): PurchasePackOptions {
+        return {
+            onStatus: (msg) => this.setStatus(msg),
+            onTeviDialog: () => this.showWaiting('Xác nhận thanh toán trên Tevi...'),
+            onTeviDialogClosed: (ok) => {
+                this.hideWaiting();
+                if (ok) {
+                    this.showPendingBanner('Thanh toán thành công!\nĐang chờ sao về...');
+                }
+            },
+            onAwaitingStars: () => {
+                this.showPendingBanner('Thanh toán thành công!\nĐang chờ sao về...');
+            },
+            onSuccess: (stars, balance) => {
+                this.hidePendingBanner();
+                this.hideWaiting();
+                this.refreshBalance();
+                this.showResultPopup(
+                    'Nạp thành công!',
+                    `+${stars}★ đã về ví!\nTổng: ${balance}★`,
+                );
+            },
+            onError: (message) => {
+                this.hidePendingBanner();
+                this.hideWaiting();
+                this.showResultPopup('Nạp thất bại', message);
+            },
+        };
     }
 
     private isEditorOrPreview(): boolean {
@@ -288,51 +564,84 @@ export class StarWalletHud extends Component {
 
     private async onPurchaseClicked(packId: string): Promise<void> {
         if (TeviPaymentService.getInstance().isBusy()) {
-            this.setStatus('Đang xử lý giao dịch trước...');
+            this.showResultPopup('Đang xử lý', 'Giao dịch trước chưa hoàn tất. Vui lòng chờ.');
             return;
         }
 
+        this.closeShop();
+        this.hidePendingBanner();
+        this.hideResultPopup();
+        this.showWaiting('Đang chuẩn bị nạp sao...');
+
+        const options = this.buildPurchaseOptions();
+
         // Editor/Preview: Mock để test UI. Bản build thật KHÔNG được fallback Mock.
         if (this.isEditorOrPreview()) {
-            this.setStatus(`[Editor] Gói ${packId} → Mock (không gọi Tevi API thật)`);
-            const mockResult = await TeviPaymentService.getInstance().mockGrantPack(
-                packId,
-                (msg) => this.setStatus(msg),
-            );
-            this.setStatus(mockResult.message);
-            this.refreshBalance();
+            this.resetStatusLog(`[Editor] Pack ${packId} → Mock`);
+            const mockResult = await TeviPaymentService.getInstance().mockGrantPack(packId, {
+                ...options,
+                onTeviDialog: () => this.showWaiting('Đang mô phỏng Tevi...'),
+                onTeviDialogClosed: (ok) => {
+                    this.hideWaiting();
+                    if (ok) this.showPendingBanner('Thanh toán mô phỏng OK\nĐang chờ sao về...');
+                },
+            });
+            this.hideWaiting();
+            this.hidePendingBanner();
+            if (mockResult.ok) {
+                this.refreshBalance();
+            } else {
+                options.onError?.(mockResult.message);
+            }
             return;
         }
 
         if (!this.hasTeviTopupBridge()) {
-            this.setStatus('FAIL: Bản build thiếu TeviJS.topup — mở trong app Tevi (không Mock).');
+            this.hideWaiting();
+            this.showResultPopup(
+                'Không hỗ trợ',
+                'Build thiếu TeviJS.topup — mở game trong app Tevi.',
+            );
             return;
         }
 
         const token = TeviLoginManager.Instance?.getUserToken()?.trim() || '';
         if (!token) {
-            this.setStatus('FAIL: Chưa login Tevi (thiếu user_app_token).');
+            this.hideWaiting();
+            this.showResultPopup('Chưa đăng nhập', 'Thiếu user_app_token. Hãy đăng nhập Tevi lại.');
             return;
         }
 
-        this.setStatus(`Bắt đầu nạp THẬT pack=${packId}`);
-        const result = await TeviPaymentService.getInstance().purchasePack(
-            packId,
-            (msg) => this.setStatus(msg),
-        );
-        this.setStatus(result.ok
-            ? result.message
-            : `FAIL: ${result.message} | ★ ${result.balance}`);
+        this.resetStatusLog(`Starting REAL top-up pack=${packId}`);
+        await TeviPaymentService.getInstance().purchasePack(packId, options);
         this.refreshBalance();
     }
 
     private async onMockClicked(packId: string): Promise<void> {
-        this.setStatus(`[Mock] Bắt đầu pack=${packId}`);
-        const result = await TeviPaymentService.getInstance().mockGrantPack(
-            packId,
-            (msg) => this.setStatus(msg),
-        );
-        this.setStatus(result.message);
+        if (TeviPaymentService.getInstance().isBusy()) {
+            this.showResultPopup('Đang xử lý', 'Giao dịch trước chưa hoàn tất. Vui lòng chờ.');
+            return;
+        }
+
+        this.closeShop();
+        this.showWaiting('Đang mô phỏng nạp sao...');
+        this.resetStatusLog(`[Mock] Starting pack=${packId}`);
+
+        const options = this.buildPurchaseOptions();
+        const result = await TeviPaymentService.getInstance().mockGrantPack(packId, {
+            ...options,
+            onTeviDialog: () => this.showWaiting('Đang mô phỏng Tevi...'),
+            onTeviDialogClosed: (ok) => {
+                this.hideWaiting();
+                if (ok) this.showPendingBanner('Thanh toán mô phỏng OK\nĐang chờ sao về...');
+            },
+        });
+
+        this.hideWaiting();
+        this.hidePendingBanner();
+        if (!result.ok) {
+            options.onError?.(result.message);
+        }
         this.refreshBalance();
     }
 }

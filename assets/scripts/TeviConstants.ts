@@ -1,11 +1,11 @@
 /** App ID Sandbox do Tevi cấp cho Mini App. */
-export const APP_ID = 'HXM37297';
+export const APP_ID = 'SRB06792';
 
 /** Môi trường chạy hiện tại của Mini App. */
 export const ENV = 'SANDBOX';
 
 /** Phiên bản cấu hình gửi sang Tevi container. */
-export const VERSION = '1.0.6';
+export const VERSION = '1.0.12';
 
 /**
  * Bật bridge Tevi giả khi chạy Editor Preview hoặc Development Build.
@@ -46,9 +46,35 @@ export function logRewardVideoFilePlan(tag: string = '[RewardVideo]'): void {
     console.log(`${tag} Worker body mẫu:`, JSON.stringify({ file: getRewardVideoFileName(5) }));
 }
 
-/** Endpoint Tevi tạo chữ ký nạp (sandbox). */
+/**
+ * Base URL Tevi Sandbox theo docs Environments:
+ * Portal: https://developers.sbx.tevi.dev/
+ * API:    https://developer-api.sbx.tevi.dev
+ */
+export const TEVI_API_BASE = 'https://developer-api.sbx.tevi.dev';
+
+/**
+ * Docs: top-up-signature gọi từ backend.
+ * Game → Cloudflare Worker → Tevi Sandbox API (không lộ API Key trên client).
+ */
+/** Cloudflare Worker base (video + top-up + webhook). */
+export const WORKER_BASE_URL =
+    'https://fancy-sun-962d.tienunity1987.workers.dev';
+
+export const TEVI_TOP_UP_SIGNATURE_PROXY_URL =
+    `${WORKER_BASE_URL}/api/top-up-signature`;
+
+/** Game poll Worker sau TeviJS.topup — đợi webhook user_topup xác nhận. */
+export const TEVI_TOP_UP_STATUS_URL =
+    `${WORKER_BASE_URL}/api/top-up-status`;
+
+/** Game gửi kết quả TeviJS.topup callback lên Worker (debug bước 5/6). */
+export const TEVI_TOP_UP_SDK_REPORT_URL =
+    `${WORKER_BASE_URL}/api/top-up-sdk-report`;
+
+/** Endpoint Tevi trực tiếp (Worker dùng; game không gọi thẳng). */
 export const TEVI_TOP_UP_SIGNATURE_URL =
-    'https://developer-api.sbx.tevi.dev/api/v1/payments/top-up-signature';
+    `${TEVI_API_BASE}/api/v1/payments/top-up-signature`;
 
 /** Mỗi lần dùng Hint / Undo / Skip tốn bao nhiêu Star. */
 export const BOOSTER_STAR_COST = 1;
@@ -72,6 +98,10 @@ export const STAR_TOPUP_PACKS: readonly StarTopUpPack[] = [
 export const STORAGE_KEYS = {
     USER_TOKEN: 'tevi_user_app_token',
     USER_ID: 'tevi_user_id',
+    /** App ID lần login cuối — đổi APP_ID trong code thì xóa token cũ. */
+    LAST_APP_ID: 'tevi_last_app_id',
     GAME_PROGRESS: 'tevi_game_progress',
     STAR_BALANCE: 'velvet_star_balance',
+    /** Danh sách clip thưởng đã xem (JSON array). */
+    WATCHED_REWARD_VIDEOS: 'velvet_watched_reward_videos',
 } as const;
