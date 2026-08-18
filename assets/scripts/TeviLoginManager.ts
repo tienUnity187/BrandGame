@@ -1,5 +1,7 @@
 import { _decorator, Component, Label, sys } from 'cc';
 import { DEV, PREVIEW } from 'cc/env';
+import { EventBus } from './core/EventBus';
+import { GameEvent } from './enums/GameEvent';
 import {
     APP_ID,
     ENABLE_TEVI_DEVELOPER_MOCK,
@@ -147,6 +149,7 @@ export class TeviLoginManager extends Component {
 
         this.setStatus(`Login cache OK JWT.app=${jwtApp || APP_ID}`);
         this.setUserInfo(`User ID: ${userId} | JWT.app=${jwtApp || APP_ID}`);
+        this.scheduleOnce(() => this.tryClaimPendingTopUps(), 0.5);
     }
 
     /**
@@ -491,6 +494,12 @@ export class TeviLoginManager extends Component {
             match: true,
             env: ENV,
         });
+        void this.tryClaimPendingTopUps();
+    }
+
+    /** Báo GameManager quét order paid (tránh import vòng TeviPaymentService). */
+    private tryClaimPendingTopUps(): void {
+        EventBus.getInstance().emit(GameEvent.REQUEST_CLAIM_PENDING_TOPUPS);
     }
 
     /**

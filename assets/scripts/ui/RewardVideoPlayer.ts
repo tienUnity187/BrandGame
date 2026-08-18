@@ -4,6 +4,7 @@ import {
     Button,
     Color,
     Component,
+    director,
     Graphics,
     Label,
     Layers,
@@ -29,6 +30,10 @@ interface RewardVideoTokenResponse {
     videoUrl?: string;
     expiresAt?: number;
     error?: string;
+    hint?: string;
+    tried?: string[];
+    resolvedKey?: string;
+    canonical?: string;
 }
 
 /**
@@ -88,9 +93,9 @@ export class RewardVideoPlayer extends Component {
 
     /**
      * Mở popup và phát video thưởng.
-     * @param videoFile Tên object trên R2, ví dụ `vn_reward_lv05.mp4`.
+     * @param videoFile Tên object trên R2, ví dụ `vn_reward_01.mp4`.
      * @param onClosedCallback Gọi đúng một lần khi đóng (xem hết hoặc bấm X).
-     * @param levelId Level mốc (5/10/15...) — dùng lưu local sau khi video đã PLAYING.
+     * @param levelId Level mốc (5/10/15/25/38/50) — dùng lưu local sau khi video đã PLAYING.
      */
     public playSecretVideo(
         videoFile: string,
@@ -107,6 +112,22 @@ export class RewardVideoPlayer extends Component {
         void this.loadAndPlaySecretVideo(videoFile, onClosedCallback, levelId);
     }
 
+    /** Gắn player lên Canvas (luôn visible) — cần khi replay clip từ Home. */
+    public mountOnVisibleRoot(): void {
+        const scene = director.getScene();
+        if (!scene?.isValid) return;
+
+        const canvas = scene.getChildByName('Canvas');
+        const parent = canvas?.isValid ? canvas : scene;
+        if (this.node.parent !== parent) {
+            this.node.setParent(parent);
+        }
+        this.node.setPosition(0, 0, 0);
+        this.node.layer = parent.layer;
+        this.node.active = true;
+        this.node.setSiblingIndex(parent.children.length - 1);
+    }
+
     /** Xin URL tạm từ Worker rồi mới phát, không giữ URL R2 trong game. */
     private async loadAndPlaySecretVideo(
         videoFile: string,
@@ -114,15 +135,16 @@ export class RewardVideoPlayer extends Component {
         levelId?: number,
     ): Promise<void> {
         this.ensureUi();
+        this.mountOnVisibleRoot();
         if (!this.videoPlayer || !this.videoContainer) {
-            this.logStatus('Lỗi: thiếu VideoPlayer/container.');
+            this.logStatus('Error: missing VideoPlayer/container.');
             onClosedCallback?.();
             return;
         }
 
         const fileName = (videoFile || '').trim();
         if (!fileName) {
-            this.logStatus('Lỗi: thiếu tên file video.');
+            this.logStatus('Error: missing video file name.');
             onClosedCallback?.();
             return;
         }
@@ -250,7 +272,12 @@ export class RewardVideoPlayer extends Component {
         console.log('[RewardVideoPlayer] /video-token response:', result);
 
         if (!response.ok) {
-            throw new Error(result.error || `Worker từ chối cấp video (HTTP ${response.status}).`);
+            const parts = [
+                result.error || `Worker từ chối cấp video (HTTP ${response.status}).`,
+                result.hint,
+                result.tried?.length ? `Đã thử: ${result.tried.join(', ')}` : '',
+            ].filter(Boolean);
+            throw new Error(parts.join(' — '));
         }
 
         const videoUrl = typeof result.videoUrl === 'string' ? result.videoUrl.trim() : '';
@@ -264,7 +291,7 @@ export class RewardVideoPlayer extends Component {
             throw new Error('Worker trả về videoUrl không đúng domain được phép.');
         }
 
-        this.logStatus(`Token OK exp=${result.expiresAt ?? '?'} | ${this.shortenUrl(parsedUrl.toString())}`);
+        this.logStatus(`Token OK exp=${result.expiresAt ?? '?'} key=${result.resolvedKey ?? fileName}`);
         return parsedUrl.toString();
     }
 
@@ -297,9 +324,15 @@ export class RewardVideoPlayer extends Component {
 
             // 200 = full file, 206 = partial — cả hai đều chứng tỏ tải được.
             const ok = response.status === 200 || response.status === 206;
-            const detail = ok
-                ? 'OK'
-                : `type=${contentType} ${sizeText}`;
+            let detail = ok ? 'OK' : `type=${contentType} ${sizeText}`;
+            if (!ok) {
+                try {
+                    const errBody = await response.clone().json() as { error?: string; hint?: string };
+                    if (errBody.error) detail = errBody.hint ? `${errBody.error} — ${errBody.hint}` : errBody.error;
+                } catch {
+                    // not JSON
+                }
+            }
 
             console.log('[RewardVideoPlayer] Probe result:', {
                 url: videoUrl,

@@ -1,12 +1,14 @@
 /**
  * VelvetNight — Cloudflare Worker (dán vào Dashboard → fancy-sun-962d)
- * WORKER_VERSION: 1.0.11
+ * WORKER_VERSION: 1.0.16
  *
  * Routes:
  *   POST /api/video-token
  *   GET|HEAD /api/video
  *   POST /api/top-up-signature
  *   GET  /api/top-up-status?order_id=...
+ *   GET  /api/top-up-unclaimed
+ *   POST /api/top-up-claim
  *   POST /api/top-up-sdk-report
  *   POST|GET /webhook/tevi
  *
@@ -26,10 +28,28 @@
  *   TEVI_WEBHOOK_SECRET   ← Webhook secret từ Tevi Developer Dashboard
  */
 
-const WORKER_VERSION = "1.0.12";
+const WORKER_VERSION = "1.0.16";
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
-const REWARD_FILE_RE = /^vn_reward_lv(0[5-9]|[1-4][0-9]|50)\.mp4$/;
+/** Game level 5 → vn_reward_01.mp4; thử alias legacy nếu R2 còn tên cũ. */
+const REWARD_LEGACY_ALIASES = {
+  "vn_reward_01.mp4": ["vn_reward_lv05.mp4"],
+  "vn_reward_02.mp4": ["vn_reward_lv10.mp4"],
+  "vn_reward_03.mp4": ["vn_reward_lv15.mp4"],
+  "vn_reward_04.mp4": ["vn_reward_lv20.mp4", "vn_reward_lv25.mp4"],
+  "vn_reward_05.mp4": ["vn_reward_lv30.mp4", "vn_reward_lv35.mp4", "vn_reward_lv38.mp4", "vn_reward_lv40.mp4"],
+  "vn_reward_06.mp4": ["vn_reward_lv45.mp4", "vn_reward_lv50.mp4"],
+};
+const REWARD_ALLOWED_FILES = new Set();
+const LEGACY_FILE_TO_CANONICAL = {};
+for (const [canonical, alts] of Object.entries(REWARD_LEGACY_ALIASES)) {
+  REWARD_ALLOWED_FILES.add(canonical);
+  LEGACY_FILE_TO_CANONICAL[canonical] = canonical;
+  for (const alt of alts) {
+    REWARD_ALLOWED_FILES.add(alt);
+    LEGACY_FILE_TO_CANONICAL[alt] = canonical;
+  }
+}
 const ORDER_TTL_SECONDS = 86400;
 
 export default {
@@ -53,6 +73,12 @@ export default {
       }
       if (url.pathname === "/api/top-up-status" && request.method === "GET") {
         return getTopUpStatus(request, env);
+      }
+      if (url.pathname === "/api/top-up-unclaimed" && request.method === "GET") {
+        return getTopUpUnclaimed(request, env);
+      }
+      if (url.pathname === "/api/top-up-claim" && request.method === "POST") {
+        return claimTopUpOrder(request, env);
       }
       if (url.pathname === "/api/top-up-sdk-report" && request.method === "POST") {
         return reportTopUpSdkCallback(request, env);
@@ -248,7 +274,43 @@ async function hmacSign(secret, message) {
 }
 
 function isAllowedRewardFile(fileName) {
-  return REWARD_FILE_RE.test(String(fileName || ""));
+  return REWARD_ALLOWED_FILES.has(String(fileName || "").trim());
+}
+
+function canonicalRewardFile(fileName) {
+  const f = String(fileName || "").trim();
+  return LEGACY_FILE_TO_CANONICAL[f] || null;
+}
+
+/** Tìm object R2: tên chuẩn trước, rồi alias legacy (vn_reward_lv05.mp4…). */
+async function resolveRewardVideoObject(env, fileName) {
+  const canonical = canonicalRewardFile(fileName);
+  if (!canonical) {
+    return { ok: false, error: "invalid_name", requested: fileName };
+  }
+  const keysToTry = [canonical, ...(REWARD_LEGACY_ALIASES[canonical] || [])];
+  for (const key of keysToTry) {
+    const object = await env.VIDEOS.get(key);
+    if (!object) continue;
+    if (object.size <= 0) {
+      return {
+        ok: false,
+        error: "empty_file",
+        key,
+        size: object.size,
+        hint: `Object "${key}" exists but size=0. Re-upload the MP4.`,
+      };
+    }
+    return { ok: true, object, key, canonical };
+  }
+  return {
+    ok: false,
+    error: "not_found",
+    requested: fileName,
+    canonical,
+    tried: keysToTry,
+    hint: `Upload MP4 to R2 bucket (binding VIDEOS), key exactly "${canonical}" at bucket root.`,
+  };
 }
 
 async function createVideoToken(request, env, workerOrigin) {
@@ -262,13 +324,37 @@ async function createVideoToken(request, env, workerOrigin) {
   try { body = await request.json(); } catch { body = {}; }
   const fileName = String(body.file || env.ALLOWED_FILE || "").trim();
   if (!fileName || !isAllowedRewardFile(fileName)) {
-    return json({ error: `Invalid file: ${fileName}` }, 400, request, env);
+    return json({
+      error: `Invalid file: ${fileName}`,
+      allowed: [...REWARD_ALLOWED_FILES],
+      worker_version: WORKER_VERSION,
+      hint: "Deploy Worker mới (>=1.0.15) nếu game gửi vn_reward_01.mp4…06.mp4.",
+    }, 400, request, env);
+  }
+  const canonical = canonicalRewardFile(fileName);
+  const resolved = await resolveRewardVideoObject(env, fileName);
+  if (!resolved.ok) {
+    return json({
+      error: resolved.error === "not_found"
+        ? `File not found: ${canonical}`
+        : resolved.error,
+      requested: fileName,
+      canonical,
+      tried: resolved.tried,
+      hint: resolved.hint,
+      worker_version: WORKER_VERSION,
+    }, 404, request, env);
   }
   const ttl = Number(env.TOKEN_TTL_SECONDS || 600);
   const exp = Math.floor(Date.now() / 1000) + ttl;
-  const sig = await hmacSign(env.VIDEO_SIGNING_SECRET, `${fileName}:${exp}`);
-  const videoUrl = `${workerOrigin}/api/video?file=${encodeURIComponent(fileName)}&exp=${exp}&sig=${sig}`;
-  return json({ videoUrl, expiresAt: exp }, 200, request, env);
+  const sig = await hmacSign(env.VIDEO_SIGNING_SECRET, `${canonical}:${exp}`);
+  const videoUrl = `${workerOrigin}/api/video?file=${encodeURIComponent(canonical)}&exp=${exp}&sig=${sig}`;
+  return json({
+    videoUrl,
+    expiresAt: exp,
+    resolvedKey: resolved.key,
+    worker_version: WORKER_VERSION,
+  }, 200, request, env);
 }
 
 async function serveVideo(request, env) {
@@ -288,8 +374,15 @@ async function serveVideo(request, env) {
   if (Math.floor(Date.now() / 1000) > exp) return json({ error: "Token expired" }, 401, request, env);
   const expected = await hmacSign(env.VIDEO_SIGNING_SECRET, `${fileName}:${exp}`);
   if (expected !== sig) return json({ error: "Invalid signature" }, 401, request, env);
-  const object = await env.VIDEOS.get(fileName);
-  if (!object) return json({ error: `File not found: ${fileName}` }, 404, request, env);
+  const resolved = await resolveRewardVideoObject(env, fileName);
+  if (!resolved.ok) {
+    return json({
+      error: `File not found: ${fileName}`,
+      tried: resolved.tried,
+      hint: resolved.hint,
+    }, 404, request, env);
+  }
+  const object = resolved.object;
   const headers = {
     "Content-Type": object.httpMetadata?.contentType || "video/mp4",
     "Accept-Ranges": "bytes",
@@ -441,6 +534,111 @@ async function getTopUpStatus(request, env) {
     hint,
     worker_version: WORKER_VERSION,
   }, 200, request, env);
+}
+
+/** Paid orders chưa claim — game quét khi mở lại sau khi user tắt app giữa chừng. */
+async function getTopUpUnclaimed(request, env) {
+  const originError = validateOrigin(request, env);
+  if (originError) return originError;
+
+  const user = await verifyTeviUser(request, env);
+  if (!user) return json({ success: false, message: "Unauthorized" }, 401, request, env);
+
+  const userId = extractUserIdFromClaims(user);
+  if (!userId) {
+    return json({ success: false, message: "Cannot read user_id from token" }, 400, request, env);
+  }
+  if (!env.TOPUP_ORDERS) {
+    return json({ success: true, orders: [], worker_version: WORKER_VERSION }, 200, request, env);
+  }
+
+  const list = await env.TOPUP_ORDERS.list({ prefix: "order:" });
+  const orders = [];
+  for (const key of list.keys) {
+    const raw = await env.TOPUP_ORDERS.get(key.name);
+    if (!raw) continue;
+    let rec;
+    try { rec = JSON.parse(raw); } catch { continue; }
+    if (rec?.status !== "paid") continue;
+    if (rec?.claimed_at) continue;
+    if (`${rec.user_id}` !== userId) continue;
+    orders.push({
+      order_id: rec.order_id,
+      stars: rec.stars,
+      amount: rec.amount,
+      pack_id: rec.pack_id,
+      paid_at: rec.paid_at,
+      exchange_id: rec.exchange_id,
+    });
+  }
+  orders.sort((a, b) => `${a.paid_at || ""}`.localeCompare(`${b.paid_at || ""}`));
+  return json({ success: true, orders, worker_version: WORKER_VERSION }, 200, request, env);
+}
+
+/** Client đã cộng ★ — đánh dấu KV để không trả lại trong unclaimed. */
+async function claimTopUpOrder(request, env) {
+  const originError = validateOrigin(request, env);
+  if (originError) return originError;
+
+  const user = await verifyTeviUser(request, env);
+  if (!user) return json({ success: false, message: "Unauthorized" }, 401, request, env);
+
+  const userId = extractUserIdFromClaims(user);
+  if (!userId) {
+    return json({ success: false, message: "Cannot read user_id from token" }, 400, request, env);
+  }
+
+  let body = {};
+  try { body = await request.json(); } catch { body = {}; }
+  const orderId = String(body.order_id || "").trim();
+  if (!orderId) {
+    return json({ success: false, message: "Missing order_id" }, 400, request, env);
+  }
+
+  const record = await loadOrder(env, orderId);
+  if (!record) {
+    return json({ success: false, message: "Order not found", order_id: orderId }, 404, request, env);
+  }
+  if (`${record.user_id}` !== userId) {
+    return json({ success: false, message: "Order belongs to another user" }, 403, request, env);
+  }
+  if (record.status !== "paid") {
+    return json({
+      success: false,
+      message: "Order not paid yet",
+      status: record.status,
+      order_id: orderId,
+    }, 400, request, env);
+  }
+  if (record.claimed_at) {
+    return json({
+      success: true,
+      already_claimed: true,
+      order_id: orderId,
+      stars: record.stars,
+      claimed_at: record.claimed_at,
+      worker_version: WORKER_VERSION,
+    }, 200, request, env);
+  }
+
+  const updated = {
+    ...record,
+    claimed_at: new Date().toISOString(),
+    claimed_by: userId,
+  };
+  await saveOrder(env, updated);
+  return json({
+    success: true,
+    already_claimed: false,
+    order_id: orderId,
+    stars: record.stars,
+    claimed_at: updated.claimed_at,
+    worker_version: WORKER_VERSION,
+  }, 200, request, env);
+}
+
+function extractUserIdFromClaims(user) {
+  return String(user?.user_id || user?.userId || user?.sub || user?.id || "").trim();
 }
 
 async function reportTopUpSdkCallback(request, env) {

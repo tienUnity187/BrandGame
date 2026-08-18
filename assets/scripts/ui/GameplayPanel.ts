@@ -6,7 +6,7 @@ import { LevelManager } from '../managers/LevelManager';
 import { OrderManager } from '../managers/OrderManager';
 import { BoosterManager } from '../managers/BoosterManager';
 import { AudioManager } from '../managers/AudioManager';
-import { BOOSTER_STAR_COST } from '../TeviConstants';
+import { HINT_STAR_COST, SKIP_STAR_COST, UNDO_STAR_COST } from '../TeviConstants';
 import { StarWallet } from '../services/StarWallet';
 
 const { ccclass, property } = _decorator;
@@ -222,11 +222,9 @@ export class GameplayPanel extends BasePanel {
     private updateBoosterUI(): void {
         const booster = BoosterManager.getInstance();
         if (!booster) return;
-        const costText = `${BOOSTER_STAR_COST}★`;
-
-        if (this.undoCountLabel) this.undoCountLabel.string = costText;
-        if (this.hintCountLabel) this.hintCountLabel.string = costText;
-        if (this.skipCountLabel) this.skipCountLabel.string = costText;
+        if (this.undoCountLabel) this.undoCountLabel.string = `${UNDO_STAR_COST}`;
+        if (this.hintCountLabel) this.hintCountLabel.string = `${HINT_STAR_COST}`;
+        if (this.skipCountLabel) this.skipCountLabel.string = `${SKIP_STAR_COST}`;
 
         if (this.undoButton) this.undoButton.interactable = booster.canUseUndo();
         if (this.hintButton) this.hintButton.interactable = booster.canUseHint();

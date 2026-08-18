@@ -18,6 +18,7 @@ import { GameEvent } from '../enums/GameEvent';
 import { APP_ID, STAR_TOPUP_PACKS, VERSION } from '../TeviConstants';
 import { StarWallet } from '../services/StarWallet';
 import { TeviPaymentService, PurchasePackOptions } from '../services/TeviPaymentService';
+import { TopUpPendingStore } from '../services/TopUpPendingStore';
 import { TeviLoginManager } from '../TeviLoginManager';
 
 const { ccclass } = _decorator;
@@ -42,6 +43,8 @@ export class StarWalletHud extends Component {
     /** Giữ vài dòng status gần nhất — tránh mất JWT.app vì chạy quá nhanh. */
     private _statusLines: string[] = [];
     private static readonly STATUS_MAX_LINES = 8;
+    /** Popup claim chờ HUD/splash sẵn sàng. */
+    private static _queuedClaimPopup: { stars: number; balance: number } | null = null;
 
     protected onLoad(): void {
         if (StarWalletHud.Instance && StarWalletHud.Instance !== this) {
@@ -52,13 +55,90 @@ export class StarWalletHud extends Component {
         this.ensureUi();
         this.refreshBalance();
         EventBus.getInstance().on(GameEvent.STAR_BALANCE_CHANGED, this.onBalanceChanged, this);
+        EventBus.getInstance().on(GameEvent.PENDING_TOPUP_CLAIMED, this.onPendingTopUpClaimed, this);
+        this.scheduleOnce(() => this.checkPendingTopUpOnBoot(), 1);
+        this.flushQueuedClaimPopup();
+    }
+
+    /**
+     * Hiện popup khi claim ★ từ lần nạp trước (tắt app giữa chừng).
+     * Gọi trực tiếp từ TeviPaymentService — không phụ thuộc EventBus timing.
+     */
+    public static notifyTopUpClaimSuccess(totalStars: number, balance: number): void {
+        if (totalStars <= 0) return;
+        const stars = Math.floor(totalStars);
+        const bal = Math.floor(balance);
+        const hud = StarWalletHud.Instance;
+        if (hud?.node?.isValid) {
+            hud.queueClaimSuccessPopup(stars, bal);
+            return;
+        }
+        StarWalletHud._queuedClaimPopup = { stars, balance: bal };
+    }
+
+    private flushQueuedClaimPopup(): void {
+        if (!StarWalletHud._queuedClaimPopup) return;
+        const queued = StarWalletHud._queuedClaimPopup;
+        StarWalletHud._queuedClaimPopup = null;
+        this.queueClaimSuccessPopup(queued.stars, queued.balance);
+    }
+
+    /** Delay ngắn để popup không bị splash/Home che. */
+    private queueClaimSuccessPopup(totalStars: number, balance: number): void {
+        this.unschedule(this.presentClaimSuccessPopup);
+        this.scheduleOnce(this.presentClaimSuccessPopup, 0.9);
+        this._queuedPopupStars = totalStars;
+        this._queuedPopupBalance = balance;
+    }
+
+    private _queuedPopupStars = 0;
+    private _queuedPopupBalance = 0;
+
+    private presentClaimSuccessPopup = (): void => {
+        const stars = this._queuedPopupStars;
+        const balance = this._queuedPopupBalance;
+        if (stars <= 0) return;
+        this.presentTopUpSuccessPopup(stars, balance, true);
+    };
+
+    /** Popup thành công nạp / claim (fromPreviousPurchase = mở lại app sau khi tắt). */
+    public presentTopUpSuccessPopup(
+        stars: number,
+        balance: number,
+        fromPreviousPurchase: boolean,
+    ): void {
+        this.hidePendingBanner();
+        this.hideWaiting();
+        this.refreshBalance();
+        const title = fromPreviousPurchase ? 'Top-up received!' : 'Top-up successful!';
+        const message = fromPreviousPurchase
+            ? 'Your payment was confirmed.\n\n'
+                + `+${stars}★ added to your wallet!\n`
+                + `Total: ${balance}★`
+            : `+${stars}★ added!\nTotal: ${balance}★`;
+        this.showResultPopup(title, message);
+        StarWalletHud.logStatus(`Popup: ${title} +${stars}★`);
     }
 
     protected onDestroy(): void {
+        this.unschedule(this.presentClaimSuccessPopup);
         EventBus.getInstance().off(GameEvent.STAR_BALANCE_CHANGED, this.onBalanceChanged, this);
+        EventBus.getInstance().off(GameEvent.PENDING_TOPUP_CLAIMED, this.onPendingTopUpClaimed, this);
         if (StarWalletHud.Instance === this) {
             StarWalletHud.Instance = null;
         }
+    }
+
+    /** Ghi log lên shop Status label + Tevi statusLabel (dùng từ payment/claim mọi lúc). */
+    public static logStatus(message: string): void {
+        const line = `${message}`.trim();
+        if (!line) return;
+        if (StarWalletHud.Instance?.node?.isValid) {
+            StarWalletHud.Instance.appendStatus(line);
+            return;
+        }
+        TeviLoginManager.Instance?.setDebugStatus(`Star: ${line}`);
+        console.log('[StarWalletHud]', line);
     }
 
     public refreshBalance(): void {
@@ -72,6 +152,34 @@ export class StarWalletHud extends Component {
         if (this._balanceLabel) {
             this._balanceLabel.string = `★ ${balance}`;
         }
+    }
+
+    private onPendingTopUpClaimed(_totalStars: number, _balance: number): void {
+        // Popup via StarWalletHud.notifyTopUpClaimSuccess() in TeviPaymentService.
+    }
+
+    /** Sau khi mở lại app — chỉ hiện banner nếu Tevi đã confirm mua mà sao chưa về. */
+    private checkPendingTopUpOnBoot(): void {
+        const store = TopUpPendingStore.getInstance();
+        store.discardUnconfirmedLeftovers();
+        if (!store.hasConfirmedUncreditedPurchase()) {
+            this.hidePendingBanner();
+            EventBus.getInstance().emit(GameEvent.REQUEST_CLAIM_PENDING_TOPUPS);
+            return;
+        }
+        const last = store.getLastTopUpOrder();
+        StarWalletHud.logStatus(
+            `Claim: waiting for stars${last ? ` (${last.orderId})` : ''}...`,
+        );
+        this.showPendingBanner(
+            'Payment successful!\nWaiting for stars...',
+        );
+        EventBus.getInstance().emit(GameEvent.REQUEST_CLAIM_PENDING_TOPUPS);
+    }
+
+    /** Thêm 1 dòng vào buffer Status (shop panel + Tevi label). */
+    public appendStatus(message: string): void {
+        this.setStatus(message);
     }
 
     private setStatus(message: string): void {
@@ -358,7 +466,7 @@ export class StarWalletHud extends Component {
         const labelTransform = labelNode.addComponent(UITransform);
         labelTransform.setContentSize(width - 120, 160);
         this._waitingLabel = labelNode.addComponent(Label);
-        this._waitingLabel.string = 'Đang xử lý...';
+        this._waitingLabel.string = 'Processing...';
         this._waitingLabel.fontSize = 34;
         this._waitingLabel.lineHeight = 42;
         this._waitingLabel.color = Color.WHITE;
@@ -476,7 +584,7 @@ export class StarWalletHud extends Component {
         const titleTransform = titleNode.addComponent(UITransform);
         titleTransform.setContentSize(500, 64);
         const titleLabel = titleNode.addComponent(Label);
-        titleLabel.string = 'Thông báo';
+        titleLabel.string = 'Notice';
         titleLabel.fontSize = 38;
         titleLabel.lineHeight = 44;
         titleLabel.color = new Color(255, 220, 90, 255);
@@ -517,6 +625,10 @@ export class StarWalletHud extends Component {
         if (bodyLabel) bodyLabel.string = message;
 
         this._resultPopupRoot.active = true;
+        const popupParent = this._resultPopupRoot.parent;
+        if (popupParent?.isValid) {
+            this._resultPopupRoot.setSiblingIndex(popupParent.children.length - 1);
+        }
         this.bringToFront();
     }
 
@@ -527,29 +639,25 @@ export class StarWalletHud extends Component {
     private buildPurchaseOptions(): PurchasePackOptions {
         return {
             onStatus: (msg) => this.setStatus(msg),
-            onTeviDialog: () => this.showWaiting('Xác nhận thanh toán trên Tevi...'),
+            onTeviDialog: () => this.showWaiting('Confirm payment in Tevi...'),
             onTeviDialogClosed: (ok) => {
                 this.hideWaiting();
                 if (ok) {
-                    this.showPendingBanner('Thanh toán thành công!\nĐang chờ sao về...');
+                    this.showPendingBanner('Payment successful!\nWaiting for stars...');
                 }
             },
             onAwaitingStars: () => {
-                this.showPendingBanner('Thanh toán thành công!\nĐang chờ sao về...');
+                this.showPendingBanner('Payment successful!\nWaiting for stars...');
             },
             onSuccess: (stars, balance) => {
                 this.hidePendingBanner();
                 this.hideWaiting();
-                this.refreshBalance();
-                this.showResultPopup(
-                    'Nạp thành công!',
-                    `+${stars}★ đã về ví!\nTổng: ${balance}★`,
-                );
+                this.presentTopUpSuccessPopup(stars, balance, false);
             },
             onError: (message) => {
                 this.hidePendingBanner();
                 this.hideWaiting();
-                this.showResultPopup('Nạp thất bại', message);
+                this.showResultPopup('Top-up failed', message);
             },
         };
     }
@@ -564,14 +672,14 @@ export class StarWalletHud extends Component {
 
     private async onPurchaseClicked(packId: string): Promise<void> {
         if (TeviPaymentService.getInstance().isBusy()) {
-            this.showResultPopup('Đang xử lý', 'Giao dịch trước chưa hoàn tất. Vui lòng chờ.');
+            this.showResultPopup('Processing', 'Previous transaction still in progress. Please wait.');
             return;
         }
 
         this.closeShop();
         this.hidePendingBanner();
         this.hideResultPopup();
-        this.showWaiting('Đang chuẩn bị nạp sao...');
+        this.showWaiting('Preparing top-up...');
 
         const options = this.buildPurchaseOptions();
 
@@ -580,10 +688,10 @@ export class StarWalletHud extends Component {
             this.resetStatusLog(`[Editor] Pack ${packId} → Mock`);
             const mockResult = await TeviPaymentService.getInstance().mockGrantPack(packId, {
                 ...options,
-                onTeviDialog: () => this.showWaiting('Đang mô phỏng Tevi...'),
+                onTeviDialog: () => this.showWaiting('Simulating Tevi...'),
                 onTeviDialogClosed: (ok) => {
                     this.hideWaiting();
-                    if (ok) this.showPendingBanner('Thanh toán mô phỏng OK\nĐang chờ sao về...');
+                    if (ok) this.showPendingBanner('Simulated payment OK\nWaiting for stars...');
                 },
             });
             this.hideWaiting();
@@ -599,8 +707,8 @@ export class StarWalletHud extends Component {
         if (!this.hasTeviTopupBridge()) {
             this.hideWaiting();
             this.showResultPopup(
-                'Không hỗ trợ',
-                'Build thiếu TeviJS.topup — mở game trong app Tevi.',
+                'Not supported',
+                'Missing TeviJS.topup — open the game in the Tevi app.',
             );
             return;
         }
@@ -608,7 +716,7 @@ export class StarWalletHud extends Component {
         const token = TeviLoginManager.Instance?.getUserToken()?.trim() || '';
         if (!token) {
             this.hideWaiting();
-            this.showResultPopup('Chưa đăng nhập', 'Thiếu user_app_token. Hãy đăng nhập Tevi lại.');
+            this.showResultPopup('Not logged in', 'Missing user_app_token. Please log in to Tevi again.');
             return;
         }
 
@@ -619,21 +727,21 @@ export class StarWalletHud extends Component {
 
     private async onMockClicked(packId: string): Promise<void> {
         if (TeviPaymentService.getInstance().isBusy()) {
-            this.showResultPopup('Đang xử lý', 'Giao dịch trước chưa hoàn tất. Vui lòng chờ.');
+            this.showResultPopup('Processing', 'Previous transaction still in progress. Please wait.');
             return;
         }
 
         this.closeShop();
-        this.showWaiting('Đang mô phỏng nạp sao...');
+        this.showWaiting('Simulating top-up...');
         this.resetStatusLog(`[Mock] Starting pack=${packId}`);
 
         const options = this.buildPurchaseOptions();
         const result = await TeviPaymentService.getInstance().mockGrantPack(packId, {
             ...options,
-            onTeviDialog: () => this.showWaiting('Đang mô phỏng Tevi...'),
+            onTeviDialog: () => this.showWaiting('Simulating Tevi...'),
             onTeviDialogClosed: (ok) => {
                 this.hideWaiting();
-                if (ok) this.showPendingBanner('Thanh toán mô phỏng OK\nĐang chờ sao về...');
+                if (ok) this.showPendingBanner('Simulated payment OK\nWaiting for stars...');
             },
         });
 

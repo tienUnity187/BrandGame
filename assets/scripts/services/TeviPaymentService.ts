@@ -5,13 +5,19 @@ import {
     STAR_TOPUP_PACKS,
     StarTopUpPack,
     TEVI_API_BASE,
+    TEVI_TOP_UP_CLAIM_URL,
     TEVI_TOP_UP_SIGNATURE_PROXY_URL,
     TEVI_TOP_UP_SIGNATURE_URL,
     TEVI_TOP_UP_STATUS_URL,
     TEVI_TOP_UP_SDK_REPORT_URL,
+    TEVI_TOP_UP_UNCLAIMED_URL,
     VERSION,
 } from '../TeviConstants';
+import { EventBus } from '../core/EventBus';
+import { GameEvent } from '../enums/GameEvent';
 import { StarWallet } from './StarWallet';
+import { TopUpPendingStore } from './TopUpPendingStore';
+import { StarWalletHud } from '../ui/StarWalletHud';
 
 export type PaymentStatusCallback = (message: string) => void;
 
@@ -77,10 +83,17 @@ interface TopUpSignatureResponse {
 export class TeviPaymentService {
     private static _instance: TeviPaymentService | null = null;
     private _busy = false;
+    private _claimRunning = false;
 
     /** Poll webhook tối đa ~90s (45 × 2s). */
     private static readonly WEBHOOK_POLL_ATTEMPTS = 45;
     private static readonly WEBHOOK_POLL_INTERVAL_MS = 2000;
+    /** Retry claim khi tắt app giữa chừng — webhook có thể tới sau khi mở lại. */
+    private static readonly CLAIM_RETRY_INTERVAL_MS = 15000;
+    private static readonly CLAIM_RETRY_MAX = 20;
+
+    private _claimRetryCount = 0;
+    private _claimRetryScheduled = false;
 
     public static getInstance(): TeviPaymentService {
         if (!TeviPaymentService._instance) {
@@ -95,6 +108,247 @@ export class TeviPaymentService {
 
     public isBusy(): boolean {
         return this._busy;
+    }
+
+    /**
+     * Mở lại game sau khi tắt giữa chừng — quét order paid chưa cộng ★.
+     * Gọi sau khi có user_app_token (login xong).
+     */
+    public async claimPendingTopUps(): Promise<{
+        claimed: Array<{ orderId: string; stars: number }>;
+        totalStars: number;
+        balance: number;
+        pendingCount: number;
+        unclaimedFetchOk: boolean;
+    }> {
+        const store = TopUpPendingStore.getInstance();
+        store.discardUnconfirmedLeftovers();
+        const pendingCount = store.getPending().filter(p => p.confirmed && !store.isCredited(p.orderId)).length
+            + (store.getLastTopUpOrder()?.confirmed && !store.isCredited(store.getLastTopUpOrder()!.orderId) ? 1 : 0);
+
+        const login = TeviLoginManager.Instance;
+        let userToken = login?.getUserToken()?.trim() || '';
+        const hasConfirmedPending = pendingCount > 0;
+        if (login && hasConfirmedPending) {
+            try {
+                userToken = await login.refreshLoginForPayment();
+                StarWalletHud.logStatus('Claim: token refreshed for claim');
+            } catch (refreshError) {
+                userToken = login.getUserToken()?.trim() || '';
+                const refreshMsg = refreshError instanceof Error ? refreshError.message : `${refreshError}`;
+                if (userToken) {
+                    StarWalletHud.logStatus(`Claim: using cached token (${refreshMsg})`);
+                }
+            }
+        }
+        if (!userToken) {
+            if (hasConfirmedPending) {
+                StarWalletHud.logStatus('Claim: waiting for login (no token yet)...');
+                this.scheduleClaimRetryIfNeeded(pendingCount);
+            }
+            return {
+                claimed: [],
+                totalStars: 0,
+                balance: StarWallet.getInstance().getBalance(),
+                pendingCount,
+                unclaimedFetchOk: false,
+            };
+        }
+        if (this._busy || this._claimRunning) {
+            return {
+                claimed: [],
+                totalStars: 0,
+                balance: StarWallet.getInstance().getBalance(),
+                pendingCount,
+                unclaimedFetchOk: false,
+            };
+        }
+
+        if (hasConfirmedPending) {
+            StarWalletHud.logStatus(
+                `Claim: start pending=${pendingCount} url=${TEVI_TOP_UP_UNCLAIMED_URL}`,
+            );
+        }
+
+        this._claimRunning = true;
+        try {
+            const result = await this.runClaimPendingTopUps(userToken);
+            if (result.totalStars > 0) {
+                StarWalletHud.logStatus(
+                    `Claim OK +${result.totalStars}★ balance=${result.balance}`,
+                );
+            } else if (result.pendingCount > 0) {
+                StarWalletHud.logStatus(
+                    `Claim: ${result.pendingCount} order(s) — webhook not paid yet, retrying...`,
+                );
+            } else if (!result.unclaimedFetchOk && hasConfirmedPending) {
+                StarWalletHud.logStatus(
+                    'Claim: Worker unclaimed API failed — deploy Worker v1.0.13?',
+                );
+            } else if (hasConfirmedPending) {
+                StarWalletHud.logStatus('Claim: nothing to receive');
+            }
+            console.log('[TeviPayment] claimPendingTopUps done', result);
+            if (result.totalStars > 0) {
+                this._claimRetryCount = 0;
+            } else {
+                this.scheduleClaimRetryIfNeeded(result.pendingCount, !result.unclaimedFetchOk && hasConfirmedPending);
+            }
+            return result;
+        } finally {
+            this._claimRunning = false;
+        }
+    }
+
+    private scheduleClaimRetryIfNeeded(pendingCount: number, forceRetry: boolean = false): void {
+        if (!forceRetry && pendingCount <= 0 && !TopUpPendingStore.getInstance().hasUncreditedWork()) return;
+        if (this._claimRetryCount >= TeviPaymentService.CLAIM_RETRY_MAX) {
+            StarWalletHud.logStatus(
+                'Claim: timeout — check KV order paid + Worker v1.0.13',
+            );
+            console.warn('[TeviPayment] claim retry exhausted');
+            return;
+        }
+        if (this._claimRetryScheduled) return;
+        this._claimRetryScheduled = true;
+        this._claimRetryCount++;
+        const delaySec = TeviPaymentService.CLAIM_RETRY_INTERVAL_MS / 1000;
+        StarWalletHud.logStatus(
+            `Claim: retry ${this._claimRetryCount}/${TeviPaymentService.CLAIM_RETRY_MAX} in ${delaySec}s`,
+        );
+        setTimeout(() => {
+            this._claimRetryScheduled = false;
+            EventBus.getInstance().emit(GameEvent.REQUEST_CLAIM_PENDING_TOPUPS);
+        }, TeviPaymentService.CLAIM_RETRY_INTERVAL_MS);
+    }
+
+    private hasUncreditedPending(): boolean {
+        return TopUpPendingStore.getInstance().hasUncreditedWork();
+    }
+
+    private async runClaimPendingTopUps(userToken: string): Promise<{
+        claimed: Array<{ orderId: string; stars: number }>;
+        totalStars: number;
+        balance: number;
+        pendingCount: number;
+        unclaimedFetchOk: boolean;
+    }> {
+        const store = TopUpPendingStore.getInstance();
+        const candidates = new Map<string, number>();
+        /** Order Worker đã xác nhận paid qua /unclaimed — không cần poll lại. */
+        const paidFromWorker = new Map<string, number>();
+
+        for (const pending of store.getPending()) {
+            if (pending.confirmed && !store.isCredited(pending.orderId)) {
+                candidates.set(pending.orderId, pending.stars);
+            }
+        }
+
+        const lastOrder = store.getLastTopUpOrder();
+        if (lastOrder?.confirmed && !store.isCredited(lastOrder.orderId)) {
+            candidates.set(lastOrder.orderId, lastOrder.stars);
+            StarWalletHud.logStatus(`Claim: backup last order=${lastOrder.orderId}`);
+        }
+
+        let unclaimedFetchOk = false;
+        try {
+            const unclaimed = await this.fetchUnclaimedOrders(userToken);
+            unclaimedFetchOk = true;
+            if (unclaimed.length > 0 || store.hasConfirmedUncreditedPurchase()) {
+                StarWalletHud.logStatus(
+                    `Claim: Worker unclaimed=${unclaimed.length} order(s)`,
+                );
+            }
+            console.log('[TeviPayment] unclaimed orders from Worker:', unclaimed);
+            for (const order of unclaimed) {
+                if (!order.order_id || store.isCredited(order.order_id)) continue;
+                const stars = Math.max(0, Math.floor(Number(order.stars) || 0));
+                candidates.set(order.order_id, stars);
+                paidFromWorker.set(order.order_id, stars);
+            }
+        } catch (error) {
+            const message = error instanceof Error ? error.message : `${error}`;
+            StarWalletHud.logStatus(`Claim: unclaimed API error — ${message}`);
+            console.warn('[TeviPayment] top-up-unclaimed failed:', message);
+        }
+
+        if (candidates.size === 0) {
+            const pendingCount = store.hasUncreditedWork() ? 1 : 0;
+            return {
+                claimed: [],
+                totalStars: 0,
+                balance: StarWallet.getInstance().getBalance(),
+                pendingCount,
+                unclaimedFetchOk,
+            };
+        }
+
+        StarWalletHud.logStatus(`Claim: processing ${candidates.size} order(s)...`);
+        console.log('[TeviPayment] claim candidates:', [...candidates.keys()]);
+
+        const claimed: Array<{ orderId: string; stars: number }> = [];
+        let totalStars = 0;
+
+        for (const [orderId, fallbackStars] of candidates) {
+            if (store.isCredited(orderId)) continue;
+
+            let stars = fallbackStars;
+
+            // Worker /unclaimed chỉ trả paid — tin tưởng trực tiếp, tránh poll 401 khi mở app lạnh.
+            if (paidFromWorker.has(orderId)) {
+                stars = Math.max(stars, paidFromWorker.get(orderId) || 0);
+                StarWalletHud.logStatus(
+                    `Claim: Worker paid ${orderId} → +${stars}★ (no re-poll)`,
+                );
+            } else {
+                try {
+                    const statusPayload = await this.fetchTopUpStatus(userToken, orderId);
+                    StarWalletHud.logStatus(
+                        `Claim poll ${orderId} → status=${statusPayload.status ?? '?'}`,
+                    );
+                    if (statusPayload.status !== 'paid') continue;
+                    stars = Math.max(
+                        stars,
+                        Math.floor(Number(statusPayload.stars) || 0),
+                    );
+                } catch (error) {
+                    const message = error instanceof Error ? error.message : `${error}`;
+                    StarWalletHud.logStatus(`Claim skip ${orderId}: ${message}`);
+                    console.warn(`[TeviPayment] claim skip ${orderId}:`, error);
+                    continue;
+                }
+            }
+
+            if (stars <= 0) continue;
+
+            const balance = this.creditPaidOrder(orderId, stars, `topup:claim:${orderId}`);
+            claimed.push({ orderId, stars });
+            totalStars += stars;
+            void this.notifyWorkerClaim(userToken, orderId);
+            StarWalletHud.logStatus(`Claim credited +${stars}★ order=${orderId}`);
+            console.log(`[TeviPayment] Claimed pending top-up ${orderId} → +${stars}★ (balance ${balance})`);
+        }
+
+        if (totalStars > 0) {
+            const balance = StarWallet.getInstance().getBalance();
+            StarWalletHud.notifyTopUpClaimSuccess(totalStars, balance);
+            EventBus.getInstance().emit(
+                GameEvent.PENDING_TOPUP_CLAIMED,
+                totalStars,
+                balance,
+                claimed.map(item => item.orderId),
+            );
+        }
+
+        const pendingCount = store.hasUncreditedWork() ? 1 : 0;
+
+        return {
+            claimed,
+            totalStars,
+            balance: StarWallet.getInstance().getBalance(),
+            pendingCount,
+            unclaimedFetchOk,
+        };
     }
 
     public getPackById(packId: string): StarTopUpPack | null {
@@ -203,13 +457,25 @@ export class TeviPaymentService {
                 lifecycle.onTeviDialogClosed?.(false);
                 throw topupError;
             }
+            TopUpPendingStore.getInstance().addPending({
+                orderId,
+                packId: pack.id,
+                stars: pack.stars,
+                createdAt: Date.now(),
+                confirmed: true,
+            });
             await this.reportSdkCallbackToWorker(userToken, orderId, sdkCallback, report);
 
             report(`4/6 Waiting webhook user_topup (poll ${TEVI_TOP_UP_STATUS_URL})...`);
             lifecycle.onAwaitingStars?.();
             await this.waitForWebhookPaid(userToken, orderId, sdkCallback, report);
 
-            const balance = StarWallet.getInstance().addStars(pack.stars, `topup:${pack.id}:${orderId}`);
+            const balance = this.creditPaidOrder(
+                orderId,
+                pack.stars,
+                `topup:${pack.id}:${orderId}`,
+            );
+            void this.notifyWorkerClaim(userToken, orderId);
             const message = `6/6 SUCCESS webhook paid → +${pack.stars}★ | Total ★ ${balance} | order=${orderId}`;
             report(message);
             lifecycle.onSuccess?.(pack.stars, balance);
@@ -434,6 +700,7 @@ export class TeviPaymentService {
             }
 
             if (payload.status === 'failed') {
+                TopUpPendingStore.getInstance().removePending(orderId);
                 throw new Error(
                     `Giao dịch failed (order ${orderId}). ${lastHint || 'Webhook báo thất bại.'}`,
                 );
@@ -459,6 +726,82 @@ export class TeviPaymentService {
             + '(3) exchange_id webhook không khớp order_id; '
             + '(4) thanh toán Tevi thất bại dù popup OK.',
         );
+    }
+
+    private creditPaidOrder(orderId: string, stars: number, reason: string): number {
+        const store = TopUpPendingStore.getInstance();
+        if (store.isCredited(orderId)) {
+            return StarWallet.getInstance().getBalance();
+        }
+        const balance = StarWallet.getInstance().addStars(stars, reason);
+        store.markCredited(orderId);
+        return balance;
+    }
+
+    private async fetchTopUpStatus(
+        userToken: string,
+        orderId: string,
+    ): Promise<{ status?: string; stars?: number }> {
+        const url = `${TEVI_TOP_UP_STATUS_URL}?order_id=${encodeURIComponent(orderId)}`;
+        const response = await fetch(url, {
+            method: 'GET',
+            headers: {
+                'Authorization': `Bearer ${userToken}`,
+                'Accept': 'application/json',
+            },
+        });
+        let payload: { status?: string; stars?: number; message?: string } = {};
+        try {
+            payload = await response.json();
+        } catch {
+            throw new Error(`top-up-status HTTP ${response.status}, not JSON`);
+        }
+        if (!response.ok && response.status !== 401) {
+            throw new Error(payload.message || `top-up-status HTTP ${response.status}`);
+        }
+        return payload;
+    }
+
+    private async fetchUnclaimedOrders(userToken: string): Promise<Array<{
+        order_id: string;
+        stars?: number;
+    }>> {
+        const response = await fetch(TEVI_TOP_UP_UNCLAIMED_URL, {
+            method: 'GET',
+            headers: {
+                'Authorization': `Bearer ${userToken}`,
+                'Accept': 'application/json',
+            },
+        });
+        let payload: { success?: boolean; orders?: Array<{ order_id: string; stars?: number }> } = {};
+        try {
+            payload = await response.json();
+        } catch {
+            throw new Error(`top-up-unclaimed HTTP ${response.status}, not JSON`);
+        }
+        if (!response.ok) {
+            throw new Error(
+                `top-up-unclaimed HTTP ${response.status}`
+                + (response.status === 404 ? ' — deploy Worker v1.0.13' : ''),
+            );
+        }
+        return Array.isArray(payload.orders) ? payload.orders : [];
+    }
+
+    private async notifyWorkerClaim(userToken: string, orderId: string): Promise<void> {
+        try {
+            await fetch(TEVI_TOP_UP_CLAIM_URL, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${userToken}`,
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json',
+                },
+                body: JSON.stringify({ order_id: orderId }),
+            });
+        } catch (error) {
+            console.warn(`[TeviPayment] Worker claim notify failed (${orderId}):`, error);
+        }
     }
 
     private formatSdkCallbackSummary(sdk: Record<string, unknown>): string {

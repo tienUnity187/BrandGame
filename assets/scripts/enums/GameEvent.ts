@@ -32,4 +32,8 @@ export enum GameEvent {
     STAR_BALANCE_CHANGED = 'star_balance_changed',
     /** Danh sách clip thưởng đã xem thay đổi: (levelId). */
     REWARD_VIDEO_HISTORY_CHANGED = 'reward_video_history_changed',
+    /** Claim top-up khi mở lại game: (totalStars, balance, orderIds[]). */
+    PENDING_TOPUP_CLAIMED = 'pending_topup_claimed',
+    /** Yêu cầu quét order paid (sau login Tevi). */
+    REQUEST_CLAIM_PENDING_TOPUPS = 'request_claim_pending_topups',
 }

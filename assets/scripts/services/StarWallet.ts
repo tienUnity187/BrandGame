@@ -1,7 +1,7 @@
 import { sys } from 'cc';
 import { EventBus } from '../core/EventBus';
 import { GameEvent } from '../enums/GameEvent';
-import { STORAGE_KEYS } from '../TeviConstants';
+import { STARTING_STAR_BALANCE, STORAGE_KEYS } from '../TeviConstants';
 
 /**
  * Ví Star lưu local (game offline, không backend).
@@ -20,7 +20,11 @@ export class StarWallet {
     public getBalance(): number {
         try {
             const raw = sys.localStorage.getItem(STORAGE_KEYS.STAR_BALANCE);
-            if (raw === null || raw === '') return 0;
+            if (raw === null || raw === '') {
+                this.saveBalance(STARTING_STAR_BALANCE);
+                console.log(`[StarWallet] Welcome grant ${STARTING_STAR_BALANCE}★`);
+                return STARTING_STAR_BALANCE;
+            }
             const value = parseInt(raw, 10);
             return Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
         } catch {

@@ -17,13 +17,15 @@ import { GAME_NAME } from '../core/GameBrandConfig';
 import { TeviLoginManager } from '../TeviLoginManager';
 import {
     getRewardVideoFileName,
+    isRewardVideoLevel,
     logRewardVideoFilePlan,
-    REWARD_VIDEO_LEVEL_INTERVAL,
     REWARD_VIDEO_TOKEN_URL,
+    REWARD_VIDEO_UNLOCK_LEVELS,
 } from '../TeviConstants';
 import { RewardVideoHistory } from '../services/RewardVideoHistory';
 import { RewardVideoGalleryPanel } from '../ui/RewardVideoGalleryPanel';
 import { RewardVideoPlayer } from '../ui/RewardVideoPlayer';
+import { TeviPaymentService } from '../services/TeviPaymentService';
 import { StarWalletHud } from '../ui/StarWalletHud';
 
 const { ccclass, property } = _decorator;
@@ -103,6 +105,12 @@ export class GameManager extends Component {
 
         // Lock web build to 1080x1920 aspect ratio, fit inside browser without stretching.
         view.setDesignResolutionSize(1080, 1920, ResolutionPolicy.SHOW_ALL);
+
+        // Bind sớm — Tevi login có thể xong trước khi hết splash.
+        EventBus.getInstance().on(GameEvent.LEVEL_COMPLETED, this.onLevelCompleted, this);
+        EventBus.getInstance().on(GameEvent.LEVEL_FAILED, this.onLevelFailed, this);
+        EventBus.getInstance().on(GameEvent.REWARD_VIDEO_HISTORY_CHANGED, this.refreshClipsButtonLabel, this);
+        EventBus.getInstance().on(GameEvent.REQUEST_CLAIM_PENDING_TOPUPS, this.onRequestClaimPendingTopUps, this);
     }
 
     protected async start(): Promise<void> {
@@ -155,11 +163,7 @@ export class GameManager extends Component {
             });
         }
 
-        // Listen for level end events to switch panels
-        EventBus.getInstance().on(GameEvent.LEVEL_COMPLETED, this.onLevelCompleted, this);
-        EventBus.getInstance().on(GameEvent.LEVEL_FAILED, this.onLevelFailed, this);
-        EventBus.getInstance().on(GameEvent.REWARD_VIDEO_HISTORY_CHANGED, this.refreshClipsButtonLabel, this);
-
+        // Listen for level end events to switch panels (registered early in onLoad).
         // Editor cheats: 1-9 level, R restart, N next, T win level hiện tại, B booster cheat.
         input.on(Input.EventType.KEY_DOWN, this.onKeyDown, this);
         this.bindLevelJumpUI();
@@ -167,6 +171,7 @@ export class GameManager extends Component {
         this.refreshClipsButtonLabel();
         this.startPlayButtonPulse();
         this.onInitializationReadyForHome();
+        void this.tryClaimPendingTopUps();
     }
 
     /** Editor cheats: 1-9 đổi level, R restart, N next, T thắng level hiện tại, B bật booster. */
@@ -236,12 +241,12 @@ export class GameManager extends Component {
                 return;
             }
 
-            // Thắng level 5/10/15... thì mở video thưởng tương ứng trên R2.
-            const isRewardLevel = levelId > 0 && levelId % REWARD_VIDEO_LEVEL_INTERVAL === 0;
+            // Thắng mốc 5/10/15/25/38/50 thì mở clip thưởng tương ứng trên R2.
+            const isRewardLevel = isRewardVideoLevel(levelId);
             const videoFile = isRewardLevel ? getRewardVideoFileName(levelId) : null;
             console.log('[RewardVideo][LevelComplete]', {
                 levelId,
-                interval: REWARD_VIDEO_LEVEL_INTERVAL,
+                unlockLevels: REWARD_VIDEO_UNLOCK_LEVELS,
                 isRewardLevel,
                 videoFile,
                 willCallWorker: isRewardLevel,
@@ -265,7 +270,7 @@ export class GameManager extends Component {
                 }, levelId);
             } else {
                 console.log(
-                    `[RewardVideo][LevelComplete] Skip video (level ${levelId} không phải mốc % ${REWARD_VIDEO_LEVEL_INTERVAL})`,
+                    `[RewardVideo][LevelComplete] Skip video (level ${levelId} không nằm trong ${REWARD_VIDEO_UNLOCK_LEVELS.join('/')})`,
                 );
             }
         } catch (err) {
@@ -324,9 +329,9 @@ export class GameManager extends Component {
         logRewardVideoFilePlan('[RewardVideo][Boot]');
         console.log('[RewardVideo][Boot] Token endpoint =', REWARD_VIDEO_TOKEN_URL);
         console.log(
-            '[RewardVideo][Boot] Trigger khi level %',
-            REWARD_VIDEO_LEVEL_INTERVAL,
-            '=== 0. Cheat Editor: phím T = thắng level hiện tại.',
+            '[RewardVideo][Boot] Unlock tại level',
+            REWARD_VIDEO_UNLOCK_LEVELS.join(', '),
+            '. Cheat Editor: phím T = thắng level hiện tại.',
         );
         console.log('[Save] Level đã lưu khi mở game =', this.getSavedLevelId());
 
@@ -520,6 +525,7 @@ export class GameManager extends Component {
             EventBus.getInstance().off(GameEvent.LEVEL_COMPLETED, this.onLevelCompleted, this);
             EventBus.getInstance().off(GameEvent.LEVEL_FAILED, this.onLevelFailed, this);
             EventBus.getInstance().off(GameEvent.REWARD_VIDEO_HISTORY_CHANGED, this.refreshClipsButtonLabel, this);
+            EventBus.getInstance().off(GameEvent.REQUEST_CLAIM_PENDING_TOPUPS, this.onRequestClaimPendingTopUps, this);
             input.off(Input.EventType.KEY_DOWN, this.onKeyDown, this);
             if (this.levelJumpOk) {
                 this.levelJumpOk.node.off(Button.EventType.CLICK, this.onClickLevelJump, this);
@@ -603,8 +609,10 @@ export class GameManager extends Component {
     }
 
     private async onClipsButtonClicked(): Promise<void> {
-        console.log('[RewardVideo] Click Clip → mở RewardVideoGalleryPanel');
+        console.log('[RewardVideo] Click Clip → open RewardVideoGalleryPanel');
         await this.waitForInitialization();
+        this.ensureRewardVideoPlayer();
+        RewardVideoPlayer.Instance?.mountOnVisibleRoot();
         const panel = await UIManager.getInstance().openPanel('RewardVideoGalleryPanel');
         if (!panel) {
             console.warn(
@@ -644,6 +652,8 @@ export class GameManager extends Component {
 
     /** Fallback khi prefab Missing Script / load fail: tạo panel runtime trên Canvas. */
     private openClipsGalleryFallback(): void {
+        this.ensureRewardVideoPlayer();
+        RewardVideoPlayer.Instance?.mountOnVisibleRoot();
         const canvas = this.node.parent;
         const parent = canvas?.isValid ? canvas : this.node;
         let panel = RewardVideoGalleryPanel.Instance;
@@ -700,7 +710,7 @@ export class GameManager extends Component {
         const levelId = this.getSavedLevelId();
 
         await this.waitForInitialization();
-        UIManager.getInstance()?.showLoading('Đang vào game...');
+        UIManager.getInstance()?.showLoading('Loading game...');
 
         await Promise.all([
             this.transitionToGame(),
@@ -742,6 +752,23 @@ export class GameManager extends Component {
         AudioManager.getInstance()?.bindButtonSounds(this.homeScreen);
         this.deferredBootWarmup();
         this.preloadHomeGameplayAssets();
+        void this.tryClaimPendingTopUps();
+    }
+
+    /** Sau login / mở Home — nhận ★ order paid nếu user tắt app giữa chừng. */
+    private onRequestClaimPendingTopUps(): void {
+        void this.tryClaimPendingTopUps();
+    }
+
+    private async tryClaimPendingTopUps(): Promise<void> {
+        await this.waitForInitialization();
+        try {
+            await TeviPaymentService.getInstance().claimPendingTopUps();
+        } catch (error) {
+            const message = error instanceof Error ? error.message : `${error}`;
+            StarWalletHud.logStatus(`Claim error: ${message}`);
+            console.warn('[GameManager] claimPendingTopUps failed:', error);
+        }
     }
 
     private async ensureHomeLevelPrepared(levelId: number): Promise<void> {
@@ -814,18 +841,25 @@ export class GameManager extends Component {
         const existing = RewardVideoPlayer.Instance
             || director.getScene()?.getComponentInChildren(RewardVideoPlayer)
             || null;
+        const canvas = this.node.parent;
+        const parent = canvas?.isValid ? canvas : this.node;
+
         if (existing && existing.node?.isValid) {
             RewardVideoPlayer.Instance = existing;
+            existing.node.setParent(parent);
+            existing.node.setPosition(0, 0, 0);
+            existing.node.layer = parent.layer;
+            existing.node.setSiblingIndex(parent.children.length - 1);
             return;
         }
 
-        const parent = this.uiRoot || this.node;
         const rewardNode = new Node('RewardVideoPlayer');
         rewardNode.layer = parent.layer;
         rewardNode.addComponent(UITransform);
         rewardNode.setParent(parent);
         rewardNode.setPosition(0, 0, 0);
         rewardNode.addComponent(RewardVideoPlayer);
+        rewardNode.setSiblingIndex(parent.children.length - 1);
     }
 
     /** HUD ★ + panel sandbox nạp Star (tự tạo runtime, luôn trên cùng). */

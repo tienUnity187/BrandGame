@@ -9,11 +9,14 @@ import {
     Node,
     UITransform,
     Widget,
+    director,
     view,
 } from 'cc';
 import { EventBus } from '../core/EventBus';
 import { GameEvent } from '../enums/GameEvent';
 import { RewardVideoHistory, WatchedRewardVideo } from '../services/RewardVideoHistory';
+import { REWARD_VIDEO_UNLOCK_LEVELS } from '../TeviConstants';
+import { TeviLoginManager } from '../TeviLoginManager';
 import { BasePanel } from './BasePanel';
 import { RewardVideoPlayer } from './RewardVideoPlayer';
 
@@ -116,7 +119,7 @@ export class RewardVideoGalleryPanel extends BasePanel {
         if (this.emptyLabel) {
             this.emptyLabel.node.active = watched.length === 0;
             if (watched.length === 0) {
-                this.emptyLabel.string = 'No clips yet.\nBeat levels 5, 10, 15... to unlock clips.';
+                this.emptyLabel.string = `No clips yet.\nBeat levels ${REWARD_VIDEO_UNLOCK_LEVELS.join(', ')} to unlock clips.`;
             }
         }
         if (watched.length === 0) return;
@@ -173,13 +176,38 @@ export class RewardVideoGalleryPanel extends BasePanel {
     }
 
     private onClipClicked(entry: WatchedRewardVideo): void {
-        const player = RewardVideoPlayer.Instance;
+        console.log('[RewardVideoGallery] Clip clicked', {
+            levelId: entry.levelId,
+            file: entry.file,
+        });
+        TeviLoginManager.Instance?.setDebugStatus(
+            `Clip replay Lv${entry.levelId} → ${entry.file}`,
+        );
+
+        const player = this.resolveVideoPlayer();
         if (!player) {
-            console.warn('[RewardVideoGallery] Chưa có RewardVideoPlayer.');
+            console.warn('[RewardVideoGallery] RewardVideoPlayer not available.');
+            TeviLoginManager.Instance?.setDebugStatus('Clip replay FAIL: no RewardVideoPlayer');
             return;
         }
         this.close();
-        player.playSecretVideo(entry.file, undefined, entry.levelId);
+        // Defer 1 frame so gallery close does not hide the player layer underneath.
+        this.scheduleOnce(() => {
+            console.log('[RewardVideoGallery] Starting replay', entry.file);
+            player.mountOnVisibleRoot();
+            player.playSecretVideo(entry.file, undefined, entry.levelId);
+        }, 0);
+    }
+
+    private resolveVideoPlayer(): RewardVideoPlayer | null {
+        if (RewardVideoPlayer.Instance?.node?.isValid) {
+            return RewardVideoPlayer.Instance;
+        }
+        const found = director.getScene()?.getComponentInChildren(RewardVideoPlayer) ?? null;
+        if (found) {
+            RewardVideoPlayer.Instance = found;
+        }
+        return found;
     }
 
     /** Prefab thiếu property / fallback: dựng shell UI tối thiểu. */

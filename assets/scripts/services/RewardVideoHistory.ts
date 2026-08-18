@@ -1,5 +1,5 @@
 import { sys } from 'cc';
-import { getRewardVideoFileName, STORAGE_KEYS } from '../TeviConstants';
+import { getRewardVideoFileName, isRewardVideoLevel, STORAGE_KEYS } from '../TeviConstants';
 
 /** Một clip thưởng đã xem, lưu local để xem lại. */
 export interface WatchedRewardVideo {
@@ -25,9 +25,10 @@ export class RewardVideoHistory {
     /** Đánh dấu clip của mốc level đã xem (upsert theo levelId). */
     public markWatched(levelId: number): WatchedRewardVideo | null {
         const id = Math.floor(levelId);
-        if (!Number.isFinite(id) || id <= 0) return null;
+        if (!Number.isFinite(id) || id <= 0 || !isRewardVideoLevel(id)) return null;
 
         const file = getRewardVideoFileName(id);
+        if (!file) return null;
         const entry: WatchedRewardVideo = {
             levelId: id,
             file,
@@ -64,9 +65,8 @@ export class RewardVideoHistory {
             for (const item of parsed) {
                 const levelId = Math.floor(Number(item?.levelId));
                 if (!Number.isFinite(levelId) || levelId <= 0) continue;
-                const file = typeof item?.file === 'string' && item.file.trim()
-                    ? item.file.trim()
-                    : getRewardVideoFileName(levelId);
+                const file = getRewardVideoFileName(levelId) || '';
+                if (!file) continue;
                 const watchedAt = Number(item?.watchedAt);
                 result.push({
                     levelId,
