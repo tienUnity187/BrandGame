@@ -1,11 +1,11 @@
 {
   "levelId": 28,
-  "displayName": "Level 028 - slash_bar",
+  "displayName": "Level 028 - stairs_3",
   "defaultSkin": "uma",
   "gameMode": "ORDER_MATCH",
   "startingBoosters": {
-    "HINT": 3,
-    "UNDO": 3,
+    "HINT": 1,
+    "UNDO": 1,
     "SKIP": 0
   },
   "board": {
@@ -15,38 +15,38 @@
     "tileSpacing": 236,
     "tileSpacingY": 238,
     "centerOffset": {
-      "x": -230.75,
+      "x": -230.78,
       "y": 252.45
     },
-    "tileWidth": 212,
+    "tileWidth": 211,
     "tileHeight": 214,
     "jitterX": 0.45,
     "jitterY": 0.54,
     "jitterMode": "layer_visible_mixed_shape",
     "blockMode": "overlap",
     "minBlockOverlapPixels": 1,
-    "coverThreshold": 0.08,
+    "coverThreshold": 0.06,
     "blockOverlapWidthRatio": 0.45,
     "blockOverlapHeightRatio": 0.07,
     "blockOverlapAreaRatio": 0.02,
     "shapePattern": [
       [
         1,
+        0,
+        0
+      ],
+      [
+        1,
         1,
         0
       ],
       [
-        0,
+        1,
         1,
         1
-      ],
-      [
-        1,
-        1,
-        0
       ]
     ],
-    "shapeName": "slash_bar",
+    "shapeName": "stairs_3",
     "layerOrder": "lowerOnTop"
   },
   "tray": {
@@ -70,14 +70,14 @@
       "items": [
         "14",
         "11",
-        "2"
+        "13"
       ]
     },
     {
       "id": "order_002",
       "items": [
-        "12",
-        "14",
+        "7",
+        "0",
         "15"
       ]
     },
@@ -86,47 +86,47 @@
       "items": [
         "14",
         "11",
-        "2"
+        "13"
       ]
     },
     {
       "id": "order_004",
       "items": [
-        "9",
-        "1",
-        "11"
+        "11",
+        "14",
+        "5"
       ]
     },
     {
       "id": "order_005",
       "items": [
-        "12",
-        "7",
-        "0"
+        "8",
+        "0",
+        "5"
       ]
     },
     {
       "id": "order_006",
       "items": [
-        "4",
-        "12",
-        "7"
+        "0",
+        "15",
+        "1"
       ]
     },
     {
       "id": "order_007",
       "items": [
-        "8",
-        "15",
-        "14"
+        "1",
+        "2",
+        "0"
       ]
     },
     {
       "id": "order_008",
       "items": [
-        "10",
-        "11",
-        "3"
+        "8",
+        "7",
+        "0"
       ]
     }
   ],
@@ -134,56 +134,55 @@
     [
       "14",
       "11",
-      "2"
+      "13"
     ],
     [
-      "12",
-      "14",
+      "7",
+      "0",
       "15"
     ],
     [
       "14",
       "11",
-      "2"
+      "13"
     ],
     [
-      "9",
-      "1",
-      "11"
-    ],
-    [
-      "12",
-      "7",
-      "0"
-    ],
-    [
-      "4",
-      "12",
-      "7"
+      "11",
+      "14",
+      "5"
     ],
     [
       "8",
-      "15",
-      "14"
+      "0",
+      "5"
     ],
     [
-      "10",
-      "11",
-      "3"
+      "0",
+      "15",
+      "1"
+    ],
+    [
+      "1",
+      "2",
+      "0"
+    ],
+    [
+      "8",
+      "7",
+      "0"
     ]
   ],
   "solutionMoveTileIds": [
     "L28_T003",
     "L28_T002",
-    "L28_T019",
-    "L28_T018",
     "L28_T007",
     "L28_T006",
-    "L28_T011",
-    "L28_T010",
     "L28_T015",
     "L28_T014",
-    "L28_T013",
+    "L28_T011",
+    "L28_T010",
+    "L28_T019",
+    "L28_T018",
     "L28_T023",
     "L28_T022",
     "L28_T021",
@@ -193,15 +192,16 @@
     "L28_T004",
     "L28_T009",
     "L28_T008",
+    "L28_T013",
+    "L28_T012",
     "L28_T017",
     "L28_T016",
-    "L28_T012",
     "L28_T020"
   ],
   "tiles": [
     {
       "id": "L28_T000",
-      "groupId": "4",
+      "groupId": "5",
       "tileType": 0,
       "gridX": -0.36,
       "gridY": -0.05,
@@ -213,8 +213,8 @@
       "clusterCount": 1,
       "sameLayerOverlapForbidden": true,
       "designRole": "bottom",
-      "tileWidth": 197,
-      "tileHeight": 201
+      "tileWidth": 150,
+      "tileHeight": 199
     },
     {
       "id": "L28_T001",
@@ -230,6 +230,9 @@
       "clusterCount": 1,
       "sameLayerOverlapForbidden": true,
       "designRole": "middle",
+      "strategyRole": "critical_path_decoy",
+      "decoyForStep": 5,
+      "decoyAgainstKeyTile": "L28_T015",
       "tileWidth": 203,
       "tileHeight": 201
     },
@@ -269,80 +272,9 @@
     },
     {
       "id": "L28_T004",
-      "groupId": "7",
-      "tileType": 0,
-      "gridX": 0.64,
-      "gridY": -0.05,
-      "layer": 3,
-      "active": true,
-      "selectable": false,
-      "isBlocked": true,
-      "clusteredLayout": false,
-      "clusterCount": 1,
-      "sameLayerOverlapForbidden": true,
-      "designRole": "bottom",
-      "tileWidth": 204,
-      "tileHeight": 204
-    },
-    {
-      "id": "L28_T005",
-      "groupId": "12",
-      "tileType": 0,
-      "gridX": 1.15,
-      "gridY": 0.31,
-      "layer": 2,
-      "active": true,
-      "selectable": false,
-      "isBlocked": true,
-      "clusteredLayout": false,
-      "clusterCount": 1,
-      "sameLayerOverlapForbidden": true,
-      "designRole": "middle",
-      "strategyRole": "critical_path_decoy",
-      "decoyForStep": 13,
-      "decoyAgainstKeyTile": "L28_T022",
-      "tileWidth": 204,
-      "tileHeight": 204
-    },
-    {
-      "id": "L28_T006",
       "groupId": "15",
       "tileType": 0,
-      "gridX": 0.85,
-      "gridY": -0.31,
-      "layer": 1,
-      "active": true,
-      "selectable": false,
-      "isBlocked": true,
-      "clusteredLayout": false,
-      "clusterCount": 1,
-      "sameLayerOverlapForbidden": true,
-      "designRole": "middle",
-      "tileWidth": 211,
-      "tileHeight": 214
-    },
-    {
-      "id": "L28_T007",
-      "groupId": "14",
-      "tileType": 0,
-      "gridX": 1.36,
-      "gridY": 0.05,
-      "layer": 0,
-      "active": true,
-      "selectable": true,
-      "isBlocked": false,
-      "clusteredLayout": false,
-      "clusterCount": 1,
-      "sameLayerOverlapForbidden": true,
-      "designRole": "top",
-      "tileWidth": 201,
-      "tileHeight": 214
-    },
-    {
-      "id": "L28_T008",
-      "groupId": "15",
-      "tileType": 0,
-      "gridX": 0.64,
+      "gridX": -0.36,
       "gridY": 0.95,
       "layer": 3,
       "active": true,
@@ -356,8 +288,76 @@
       "tileHeight": 214
     },
     {
+      "id": "L28_T005",
+      "groupId": "0",
+      "tileType": 0,
+      "gridX": 0.15,
+      "gridY": 1.31,
+      "layer": 2,
+      "active": true,
+      "selectable": false,
+      "isBlocked": true,
+      "clusteredLayout": false,
+      "clusterCount": 1,
+      "sameLayerOverlapForbidden": true,
+      "designRole": "middle",
+      "tileWidth": 203,
+      "tileHeight": 201
+    },
+    {
+      "id": "L28_T006",
+      "groupId": "7",
+      "tileType": 0,
+      "gridX": -0.15,
+      "gridY": 0.69,
+      "layer": 1,
+      "active": true,
+      "selectable": false,
+      "isBlocked": true,
+      "clusteredLayout": false,
+      "clusterCount": 1,
+      "sameLayerOverlapForbidden": true,
+      "designRole": "middle",
+      "tileWidth": 204,
+      "tileHeight": 204
+    },
+    {
+      "id": "L28_T007",
+      "groupId": "13",
+      "tileType": 0,
+      "gridX": 0.36,
+      "gridY": 1.05,
+      "layer": 0,
+      "active": true,
+      "selectable": true,
+      "isBlocked": false,
+      "clusteredLayout": false,
+      "clusterCount": 1,
+      "sameLayerOverlapForbidden": true,
+      "designRole": "top",
+      "tileWidth": 198,
+      "tileHeight": 204
+    },
+    {
+      "id": "L28_T008",
+      "groupId": "1",
+      "tileType": 0,
+      "gridX": 0.64,
+      "gridY": 0.95,
+      "layer": 3,
+      "active": true,
+      "selectable": false,
+      "isBlocked": true,
+      "clusteredLayout": false,
+      "clusterCount": 1,
+      "sameLayerOverlapForbidden": true,
+      "designRole": "bottom",
+      "tileWidth": 197,
+      "tileHeight": 201
+    },
+    {
       "id": "L28_T009",
-      "groupId": "8",
+      "groupId": "1",
       "tileType": 0,
       "gridX": 1.15,
       "gridY": 1.31,
@@ -369,8 +369,8 @@
       "clusterCount": 1,
       "sameLayerOverlapForbidden": true,
       "designRole": "middle",
-      "tileWidth": 202,
-      "tileHeight": 204
+      "tileWidth": 197,
+      "tileHeight": 201
     },
     {
       "id": "L28_T010",
@@ -408,78 +408,7 @@
     },
     {
       "id": "L28_T012",
-      "groupId": "11",
-      "tileType": 0,
-      "gridX": 1.64,
-      "gridY": 0.95,
-      "layer": 3,
-      "active": true,
-      "selectable": false,
-      "isBlocked": true,
-      "clusteredLayout": false,
-      "clusterCount": 1,
-      "sameLayerOverlapForbidden": true,
-      "designRole": "bottom",
-      "tileWidth": 203,
-      "tileHeight": 204
-    },
-    {
-      "id": "L28_T013",
-      "groupId": "1",
-      "tileType": 0,
-      "gridX": 2.15,
-      "gridY": 1.31,
-      "layer": 2,
-      "active": true,
-      "selectable": false,
-      "isBlocked": true,
-      "clusteredLayout": false,
-      "clusterCount": 1,
-      "sameLayerOverlapForbidden": true,
-      "designRole": "middle",
-      "tileWidth": 197,
-      "tileHeight": 201
-    },
-    {
-      "id": "L28_T014",
-      "groupId": "9",
-      "tileType": 0,
-      "gridX": 1.85,
-      "gridY": 0.69,
-      "layer": 1,
-      "active": true,
-      "selectable": false,
-      "isBlocked": true,
-      "clusteredLayout": false,
-      "clusterCount": 1,
-      "sameLayerOverlapForbidden": true,
-      "designRole": "middle",
-      "tileWidth": 210,
-      "tileHeight": 204
-    },
-    {
-      "id": "L28_T015",
-      "groupId": "2",
-      "tileType": 0,
-      "gridX": 2.36,
-      "gridY": 1.05,
-      "layer": 0,
-      "active": true,
-      "selectable": true,
-      "isBlocked": false,
-      "clusteredLayout": false,
-      "clusterCount": 1,
-      "sameLayerOverlapForbidden": true,
-      "designRole": "top",
-      "strategyRole": "opening_same_item_decoy",
-      "decoyForStep": 3,
-      "decoyAgainstKeyTile": "L28_T019",
-      "tileWidth": 194,
-      "tileHeight": 201
-    },
-    {
-      "id": "L28_T016",
-      "groupId": "10",
+      "groupId": "0",
       "tileType": 0,
       "gridX": -0.36,
       "gridY": 1.95,
@@ -491,12 +420,12 @@
       "clusterCount": 1,
       "sameLayerOverlapForbidden": true,
       "designRole": "bottom",
-      "tileWidth": 212,
-      "tileHeight": 204
+      "tileWidth": 203,
+      "tileHeight": 201
     },
     {
-      "id": "L28_T017",
-      "groupId": "14",
+      "id": "L28_T013",
+      "groupId": "2",
       "tileType": 0,
       "gridX": 0.15,
       "gridY": 2.31,
@@ -508,12 +437,12 @@
       "clusterCount": 1,
       "sameLayerOverlapForbidden": true,
       "designRole": "middle",
-      "tileWidth": 201,
-      "tileHeight": 214
+      "tileWidth": 194,
+      "tileHeight": 201
     },
     {
-      "id": "L28_T018",
-      "groupId": "12",
+      "id": "L28_T014",
+      "groupId": "15",
       "tileType": 0,
       "gridX": -0.15,
       "gridY": 1.69,
@@ -525,12 +454,12 @@
       "clusterCount": 1,
       "sameLayerOverlapForbidden": true,
       "designRole": "middle",
-      "tileWidth": 204,
-      "tileHeight": 204
+      "tileWidth": 211,
+      "tileHeight": 214
     },
     {
-      "id": "L28_T019",
-      "groupId": "2",
+      "id": "L28_T015",
+      "groupId": "0",
       "tileType": 0,
       "gridX": 0.36,
       "gridY": 2.05,
@@ -542,12 +471,12 @@
       "clusterCount": 1,
       "sameLayerOverlapForbidden": true,
       "designRole": "top",
-      "tileWidth": 194,
+      "tileWidth": 203,
       "tileHeight": 201
     },
     {
-      "id": "L28_T020",
-      "groupId": "3",
+      "id": "L28_T016",
+      "groupId": "7",
       "tileType": 0,
       "gridX": 0.64,
       "gridY": 1.95,
@@ -559,12 +488,12 @@
       "clusterCount": 1,
       "sameLayerOverlapForbidden": true,
       "designRole": "bottom",
-      "tileWidth": 198,
-      "tileHeight": 201
+      "tileWidth": 204,
+      "tileHeight": 204
     },
     {
-      "id": "L28_T021",
-      "groupId": "7",
+      "id": "L28_T017",
+      "groupId": "8",
       "tileType": 0,
       "gridX": 1.15,
       "gridY": 2.31,
@@ -576,12 +505,15 @@
       "clusterCount": 1,
       "sameLayerOverlapForbidden": true,
       "designRole": "middle",
-      "tileWidth": 204,
+      "strategyRole": "same_item_path_decoy",
+      "decoyForStep": 13,
+      "decoyAgainstKeyTile": "L28_T021",
+      "tileWidth": 202,
       "tileHeight": 204
     },
     {
-      "id": "L28_T022",
-      "groupId": "12",
+      "id": "L28_T018",
+      "groupId": "11",
       "tileType": 0,
       "gridX": 0.85,
       "gridY": 1.69,
@@ -593,12 +525,12 @@
       "clusterCount": 1,
       "sameLayerOverlapForbidden": true,
       "designRole": "middle",
-      "tileWidth": 204,
+      "tileWidth": 203,
       "tileHeight": 204
     },
     {
-      "id": "L28_T023",
-      "groupId": "11",
+      "id": "L28_T019",
+      "groupId": "13",
       "tileType": 0,
       "gridX": 1.36,
       "gridY": 2.05,
@@ -611,10 +543,81 @@
       "sameLayerOverlapForbidden": true,
       "designRole": "top",
       "strategyRole": "opening_same_item_decoy",
-      "decoyForStep": 2,
-      "decoyAgainstKeyTile": "L28_T002",
-      "tileWidth": 203,
+      "decoyForStep": 3,
+      "decoyAgainstKeyTile": "L28_T007",
+      "tileWidth": 198,
       "tileHeight": 204
+    },
+    {
+      "id": "L28_T020",
+      "groupId": "0",
+      "tileType": 0,
+      "gridX": 1.64,
+      "gridY": 1.95,
+      "layer": 3,
+      "active": true,
+      "selectable": false,
+      "isBlocked": true,
+      "clusteredLayout": false,
+      "clusterCount": 1,
+      "sameLayerOverlapForbidden": true,
+      "designRole": "bottom",
+      "tileWidth": 203,
+      "tileHeight": 201
+    },
+    {
+      "id": "L28_T021",
+      "groupId": "8",
+      "tileType": 0,
+      "gridX": 2.15,
+      "gridY": 2.31,
+      "layer": 2,
+      "active": true,
+      "selectable": false,
+      "isBlocked": true,
+      "clusteredLayout": false,
+      "clusterCount": 1,
+      "sameLayerOverlapForbidden": true,
+      "designRole": "middle",
+      "tileWidth": 202,
+      "tileHeight": 204
+    },
+    {
+      "id": "L28_T022",
+      "groupId": "5",
+      "tileType": 0,
+      "gridX": 1.85,
+      "gridY": 1.69,
+      "layer": 1,
+      "active": true,
+      "selectable": false,
+      "isBlocked": true,
+      "clusteredLayout": false,
+      "clusterCount": 1,
+      "sameLayerOverlapForbidden": true,
+      "designRole": "middle",
+      "tileWidth": 150,
+      "tileHeight": 199
+    },
+    {
+      "id": "L28_T023",
+      "groupId": "14",
+      "tileType": 0,
+      "gridX": 2.36,
+      "gridY": 2.05,
+      "layer": 0,
+      "active": true,
+      "selectable": true,
+      "isBlocked": false,
+      "clusteredLayout": false,
+      "clusterCount": 1,
+      "sameLayerOverlapForbidden": true,
+      "designRole": "top",
+      "strategyRole": "opening_same_item_decoy",
+      "decoyForStep": 1,
+      "decoyAgainstKeyTile": "L28_T003",
+      "tileWidth": 201,
+      "tileHeight": 214
     }
   ],
   "starThresholds": [
@@ -627,54 +630,38 @@
     "difficultyBand": "casual_abc",
     "difficultyIndex": 28,
     "orderPatternBand": "ABC",
-    "shapeName": "slash_bar",
+    "shapeName": "stairs_3",
     "totalTiles": 24,
     "orderCount": 8,
     "maxLayers": 4,
     "startingSelectableTiles": 24,
-    "sameItemPathDecoyCount": 0,
+    "sameItemPathDecoyCount": 1,
     "criticalPathDecoyCount": 1,
     "openingSameItemDecoyCount": 2,
-    "totalStrategicDecoyCount": 3,
-    "averageSelectableTilesDuringSolution": 4.04,
-    "averageSameItemChoicesDuringSolution": 1.38,
+    "totalStrategicDecoyCount": 4,
+    "averageSelectableTilesDuringSolution": 4.33,
+    "averageSameItemChoicesDuringSolution": 1.29,
     "maxSameItemChoicesDuringSolution": 3,
     "firstTenSameItemChoices": [
       3,
-      2,
-      2,
-      1,
-      3,
       1,
       2,
+      1,
       2,
+      1,
+      2,
+      1,
       1,
       1
     ],
-    "forcedSteps": 17,
+    "forcedSteps": 18,
     "realTrapSteps": 5,
-    "harmlessAmbiguousSteps": 2,
-    "averageCorrectChoices": 1.38,
-    "averageWinningChoices": 1.13,
+    "harmlessAmbiguousSteps": 1,
+    "averageCorrectChoices": 1.29,
+    "averageWinningChoices": 1.04,
     "firstTenBranching": [
       {
         "choices": 3,
-        "winning": 2
-      },
-      {
-        "choices": 2,
-        "winning": 2
-      },
-      {
-        "choices": 2,
-        "winning": 1
-      },
-      {
-        "choices": 1,
-        "winning": 1
-      },
-      {
-        "choices": 3,
         "winning": 1
       },
       {
@@ -686,8 +673,24 @@
         "winning": 1
       },
       {
+        "choices": 1,
+        "winning": 1
+      },
+      {
         "choices": 2,
-        "winning": 2
+        "winning": 1
+      },
+      {
+        "choices": 1,
+        "winning": 1
+      },
+      {
+        "choices": 2,
+        "winning": 1
+      },
+      {
+        "choices": 1,
+        "winning": 1
       },
       {
         "choices": 1,
@@ -698,8 +701,8 @@
         "winning": 1
       }
     ],
-    "staggeredOrders": 7,
-    "staggeredOrderRatio": 0.88,
+    "staggeredOrders": 8,
+    "staggeredOrderRatio": 1,
     "firstTenOrderStartSelectable": [
       2,
       2,
@@ -708,7 +711,7 @@
       2,
       2,
       2,
-      3
+      1
     ],
     "wrongUnlockerMoves": 0,
     "wrongUnlockerRatio": 0,
@@ -780,10 +783,10 @@
       "y": 238
     },
     "screenBounds": {
-      "minX": -384.5,
-      "maxX": 375.51,
-      "minY": -382.37,
-      "maxY": 382.38
+      "minX": -384.21,
+      "maxX": 379.2,
+      "minY": -377.37,
+      "maxY": 377.38
     },
     "screenSafeBounds": {
       "minX": -510,
@@ -794,6 +797,6 @@
     "screenFitValidated": true,
     "solutionValidated": true,
     "strategicGoal": "Progressive ORDER_MATCH puzzle with unique balanced silhouettes, deeper core stacks, exact solution path, same-item decoys, and lower layers visibly offset by about 1/3-1/2 tile area.",
-    "progressiveDifficultyScore": 156.68
+    "progressiveDifficultyScore": 158.84
   }
 }

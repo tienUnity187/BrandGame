@@ -682,7 +682,6 @@ export class TileManager extends Component {
             }
         }
         this._sortTileNodesByLayer();
-        this.refreshBlockStatus(true);
     }
 
     /** Clear tất cả tiles */

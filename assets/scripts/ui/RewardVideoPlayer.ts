@@ -53,6 +53,8 @@ export class RewardVideoPlayer extends Component {
     public videoContainer: Node | null = null;
 
     private _closeButton: Button | null = null;
+    /** Nút X HTML nằm trên thẻ <video> (web/Tevi) vì video DOM thường đè canvas. */
+    private _domCloseButton: HTMLButtonElement | null = null;
     private _onClosedCallback: (() => void) | null = null;
     private _isClosing: boolean = false;
     private _isPlaying: boolean = false;
@@ -82,6 +84,7 @@ export class RewardVideoPlayer extends Component {
 
     protected onDestroy(): void {
         this.unbindEvents();
+        this.removeDomCloseButton();
         if (this._audioPausedByVideo) {
             AudioManager.getInstance()?.resumeAllGameAudio();
             this._audioPausedByVideo = false;
@@ -173,6 +176,8 @@ export class RewardVideoPlayer extends Component {
         if (parent) {
             this.videoContainer.setSiblingIndex(parent.children.length - 1);
         }
+        this.placeCloseButtonTopRight();
+        this.showDomCloseButton();
         this.logStatus(`Popup video đã mở, đang xin token cho ${fileName}...`);
 
         try {
@@ -210,8 +215,8 @@ export class RewardVideoPlayer extends Component {
                     console.error('[RewardVideoPlayer] URL lúc lỗi:', this._lastVideoUrl);
                 }
                 console.error('[RewardVideoPlayer] Không phát được video:', error);
-                // Không gọi onClosedCallback để status lỗi không bị ghi đè thành "Đã đóng video".
-                this.closeInternal(false);
+                // Vẫn gọi callback để game không treo (level 50 notice, v.v.). Lịch sử clip chỉ lưu khi đã PLAYING.
+                this.closeInternal(true);
             }
         }
     }
@@ -466,6 +471,7 @@ export class RewardVideoPlayer extends Component {
             this.videoContainer.active = false;
         }
 
+        this.removeDomCloseButton();
         this.resumeGameAudio();
 
         const callback = this._onClosedCallback;
@@ -528,9 +534,74 @@ export class RewardVideoPlayer extends Component {
         // Ép thẻ <video> DOM theo đúng khung đã tính (web / Tevi WebView).
         this.forceDomVideoFit(videoW, videoH);
 
-        if (this._closeButton) {
-            this._closeButton.node.setPosition(screenW * 0.5 - 72, screenH * 0.5 - 96, 0);
+        this.placeCloseButtonTopRight(screenW, screenH);
+    }
+
+    /** Nút đóng luôn góc trên bên phải, trên cùng để bấm được. */
+    private placeCloseButtonTopRight(screenW?: number, screenH?: number): void {
+        if (!this._closeButton?.node?.isValid) {
+            this.ensureCloseButton();
         }
+        if (!this._closeButton?.node?.isValid) return;
+
+        const designSize = view.getDesignResolutionSize();
+        const w = screenW || designSize.width || 1080;
+        const h = screenH || designSize.height || 1920;
+        // Góc trên bên phải (anchor center của nút).
+        this._closeButton.node.setPosition(w * 0.5 - 72, h * 0.5 - 96, 0);
+        this._closeButton.node.active = true;
+
+        const parent = this._closeButton.node.parent;
+        if (parent) {
+            this._closeButton.node.setSiblingIndex(parent.children.length - 1);
+        }
+    }
+
+    /** Web/Tevi: nút X HTML góc trên phải, z-index cao hơn thẻ video. */
+    private showDomCloseButton(): void {
+        if (typeof document === 'undefined') return;
+        this.removeDomCloseButton();
+
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.textContent = 'X';
+        btn.setAttribute('aria-label', 'Đóng video');
+        btn.style.cssText = [
+            'position:fixed',
+            'top:16px',
+            'right:16px',
+            'z-index:2147483647',
+            'width:48px',
+            'height:48px',
+            'border:2px solid #fff',
+            'border-radius:12px',
+            'background:rgba(0,0,0,0.65)',
+            'color:#fff',
+            'font-size:28px',
+            'font-weight:700',
+            'line-height:44px',
+            'padding:0',
+            'cursor:pointer',
+            'pointer-events:auto',
+            '-webkit-tap-highlight-color:transparent',
+        ].join(';');
+        btn.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            this.btnClose();
+        });
+        document.body.appendChild(btn);
+        this._domCloseButton = btn;
+    }
+
+    private removeDomCloseButton(): void {
+        if (!this._domCloseButton) return;
+        try {
+            this._domCloseButton.remove();
+        } catch {
+            // ignore
+        }
+        this._domCloseButton = null;
     }
 
     /** Báo engine sync lại DOM theo contentSize mới (không dùng pixel gốc). */
@@ -626,9 +697,7 @@ export class RewardVideoPlayer extends Component {
     /** Tạo UI tối thiểu nếu chưa gán trong Inspector. */
     private ensureUi(): void {
         if (this.videoPlayer && this.videoContainer) {
-            if (!this._closeButton) {
-                this._closeButton = this.videoContainer.getComponentInChildren(Button);
-            }
+            this.ensureCloseButton();
             return;
         }
 
@@ -687,12 +756,52 @@ export class RewardVideoPlayer extends Component {
         videoPlayer.keepAspectRatio = false;
         videoPlayer.playOnAwake = false;
 
+        container.active = false;
+        this.videoContainer = container;
+        this.videoPlayer = videoPlayer;
+        this.ensureCloseButton();
+    }
+
+    /** Luôn có nút X góc trên phải để đóng video. */
+    private ensureCloseButton(): void {
+        if (!this.videoContainer) return;
+
+        if (this._closeButton?.node?.isValid) {
+            return;
+        }
+
+        const existing = this.videoContainer.getChildByName('BtnClose')
+            || this.videoContainer.getComponentInChildren(Button)?.node
+            || null;
+        if (existing?.isValid) {
+            this._closeButton = existing.getComponent(Button);
+            if (this._eventsBound && this._closeButton) {
+                this._closeButton.node.off(Button.EventType.CLICK, this.btnClose, this);
+                this._closeButton.node.on(Button.EventType.CLICK, this.btnClose, this);
+            }
+            return;
+        }
+
+        const designSize = view.getDesignResolutionSize();
+        const width = designSize.width || 1080;
+        const height = designSize.height || 1920;
+
         const closeNode = new Node('BtnClose');
         closeNode.layer = Layers.Enum.UI_2D;
-        closeNode.setParent(container);
+        closeNode.setParent(this.videoContainer);
         const closeTransform = closeNode.addComponent(UITransform);
         closeTransform.setContentSize(96, 96);
         closeNode.setPosition(width * 0.5 - 72, height * 0.5 - 96, 0);
+
+        const bg = closeNode.addComponent(Graphics);
+        bg.fillColor = new Color(0, 0, 0, 160);
+        bg.roundRect(-48, -48, 96, 96, 16);
+        bg.fill();
+        bg.strokeColor = new Color(255, 255, 255, 220);
+        bg.lineWidth = 3;
+        bg.roundRect(-48, -48, 96, 96, 16);
+        bg.stroke();
+
         const closeButton = closeNode.addComponent(Button);
         closeButton.transition = Button.Transition.SCALE;
         closeButton.zoomScale = 0.92;
@@ -704,15 +813,16 @@ export class RewardVideoPlayer extends Component {
         closeLabelTransform.setContentSize(96, 96);
         const closeLabel = closeLabelNode.addComponent(Label);
         closeLabel.string = 'X';
-        closeLabel.fontSize = 56;
-        closeLabel.lineHeight = 64;
+        closeLabel.fontSize = 52;
+        closeLabel.lineHeight = 60;
         closeLabel.color = Color.WHITE;
         closeLabel.horizontalAlign = Label.HorizontalAlign.CENTER;
         closeLabel.verticalAlign = Label.VerticalAlign.CENTER;
+        closeLabel.isBold = true;
 
-        container.active = false;
-        this.videoContainer = container;
-        this.videoPlayer = videoPlayer;
         this._closeButton = closeButton;
+        if (this._eventsBound) {
+            this._closeButton.node.on(Button.EventType.CLICK, this.btnClose, this);
+        }
     }
 }

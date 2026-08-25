@@ -1,5 +1,5 @@
 /** App ID Sandbox do Tevi cấp cho Mini App. */
-export const APP_ID = 'SRB06792';
+export const APP_ID = 'DQX81404';
 
 /** Môi trường chạy hiện tại của Mini App. */
 export const ENV = 'SANDBOX';
@@ -18,20 +18,22 @@ export const REWARD_VIDEO_TOKEN_URL =
     'https://fancy-sun-962d.tienunity1987.workers.dev/api/video-token';
 
 /**
- * 6 clip / 50 level — tạm thời 1 clip / 5 màn lúc đầu, sau giãn ra:
- *   5 / 10 / 15   (mỗi 5 level)
- *   25 / 38 / 50  (giãn dần, clip cuối = thắng campaign)
- * Upload R2 (private) đúng 6 file episode, không đặt tên theo level:
- *   vn_reward_01.mp4 … vn_reward_06.mp4
+ * 13 clip / 50 level — hook sớm, giãn dần để thúc Hint/Undo/Skip:
+ *   1, 5, 8, 12     (Act 1: dễ, tạo thói quen xem)
+ *   16, 20, 24, 28  (Act 2: vừa, 20★ tặng hết → nạp lần đầu)
+ *   32, 36, 41, 46, 50 (Act 3: khó, clip = phần thưởng sau cụm grind)
+ * Upload R2 (private): vn_reward_01.mp4 … vn_reward_13.mp4
  * Worker nhận body `{ "file": "<tên file>" }` và ký URL cho object đó.
  */
-export const REWARD_VIDEO_UNLOCK_LEVELS: readonly number[] = [5, 10, 15, 25, 38, 50];
+export const REWARD_VIDEO_UNLOCK_LEVELS: readonly number[] = [
+    1, 5, 8, 12, 16, 20, 24, 28, 32, 36, 41, 46, 50,
+];
 
 export function isRewardVideoLevel(levelId: number): boolean {
     return REWARD_VIDEO_UNLOCK_LEVELS.indexOf(Math.floor(levelId)) >= 0;
 }
 
-/** Tên object R2 theo thứ tự clip 1–6. Level không phải mốc → null. */
+/** Tên object R2 theo thứ tự clip 1–13. Level không phải mốc → null. */
 export function getRewardVideoFileName(levelId: number): string | null {
     const index = REWARD_VIDEO_UNLOCK_LEVELS.indexOf(Math.floor(levelId));
     if (index < 0) return null;
@@ -47,7 +49,7 @@ export function logRewardVideoFilePlan(tag: string = '[RewardVideo]'): void {
         level,
         file: getRewardVideoFileName(level),
     }));
-    console.log(`${tag} === PLAN: 6 clip tại level ${REWARD_VIDEO_UNLOCK_LEVELS.join(', ')} ===`);
+    console.log(`${tag} === PLAN: 13 clip tại level ${REWARD_VIDEO_UNLOCK_LEVELS.join(', ')} ===`);
     console.table(rows);
     console.log(`${tag} Worker body mẫu:`, JSON.stringify({ file: getRewardVideoFileName(REWARD_VIDEO_UNLOCK_LEVELS[0]) }));
 }
@@ -90,9 +92,12 @@ export const TEVI_TOP_UP_CLAIM_URL =
 export const TEVI_TOP_UP_SIGNATURE_URL =
     `${TEVI_API_BASE}/api/v1/payments/top-up-signature`;
 
+/** Số dư Star Tevi của user (Bearer user_app_token). */
+export const TEVI_USER_BALANCE_URL =
+    `${TEVI_API_BASE}/api/v1/auth/user/balance`;
+
 /**
- * Giá booster (1 Tevi ★ = 1 sao game).
- * $3 = 300★ ≈ 40 Undo, hoặc 15 Hint + vài Undo, hoặc ~7 Skip.
+ * Giá booster (1 Tevi Star = 1 Star game).
  */
 export const UNDO_STAR_COST = 3;
 export const HINT_STAR_COST = 8;
@@ -101,20 +106,21 @@ export const SKIP_STAR_COST = 40;
 /** Sao tặng lần đầu mở game (chưa có key ví). */
 export const STARTING_STAR_BALANCE = 20;
 
-/** Gói nạp sandbox: amount gửi Tevi + Star cộng vào ví local. */
+/** Gói nạp: 1 Tevi Star = 1 Star trong game. */
 export interface StarTopUpPack {
     id: string;
     label: string;
-    /** Số tiền gửi lên top-up-signature / TeviJS.topup (USD sandbox). */
+    /** Số Star Tevi trả (TeviJS.topup / top-up-signature). */
     amount: number;
+    /** Star cộng vào ví game (1:1 với amount). */
     stars: number;
 }
 
-/** Gói nhỏ nhất $3 — neo spend. Gói lớn hơn có bonus ★. */
+/** Gói nạp Star → Star (1:1). */
 export const STAR_TOPUP_PACKS: readonly StarTopUpPack[] = [
-    { id: 'pack_3', label: '$3 → 300★', amount: 3, stars: 300 },
-    { id: 'pack_5', label: '$5 → 550★', amount: 5, stars: 550 },
-    { id: 'pack_10', label: '$10 → 1200★', amount: 10, stars: 1200 },
+    { id: 'pack_100', label: '100 → 100', amount: 100, stars: 100 },
+    { id: 'pack_500', label: '500 → 500', amount: 500, stars: 500 },
+    { id: 'pack_1000', label: '1000 → 1000', amount: 1000, stars: 1000 },
 ] as const;
 
 /** Các key localStorage dùng chung trong toàn bộ game. */

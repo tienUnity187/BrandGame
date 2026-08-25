@@ -12,7 +12,7 @@ import { WrongTrayManager } from './WrongTrayManager';
 import { OrderTrayManager } from './OrderTrayManager';
 import { BoardPositionHelper } from '../core/BoardPositionHelper';
 import { SaveManager } from '../core/SaveManager';
-import { HINT_STAR_COST, SKIP_STAR_COST, UNDO_STAR_COST, isRewardVideoLevel } from '../TeviConstants';
+import { HINT_STAR_COST, SKIP_STAR_COST, UNDO_STAR_COST } from '../TeviConstants';
 import { StarWallet } from '../services/StarWallet';
 
 const { ccclass } = _decorator;
@@ -42,7 +42,6 @@ export class BoosterManager extends Component {
     private readonly _maxHintCount = 99;
     private readonly _maxUndoCount = 99;
     private readonly _maxSkipCount = 1;
-    /** Cấm Skip các màn mở clip — phải chơi để nhận 6 episode. */
     private readonly _testCheatBoosterCount = 99;
 
     private _hintCount: number = 1;
@@ -80,13 +79,12 @@ export class BoosterManager extends Component {
                 this._maxUndoCount,
                 this.getStartingBoosterCount(startingBoosters, 'UNDO', this._defaultUndoCount)
             );
-        this._skipCount = this.isSkipBlockedForCurrentLevel()
-            ? 0
-            : Math.min(this._maxSkipCount, SaveManager.getInstance().getSkipCount());
+        this._skipCount = Math.min(this._maxSkipCount, SaveManager.getInstance().getSkipCount());
         this._isHintPicking = false;
         this._queuedHintCount = 0;
         this._isHintQueueScheduled = false;
         this._hintQueueVersion++;
+        this._isRestoring = false;
         this.clearUndoStack();
         this.clearHighlight();
         this.emitChanged();
@@ -733,16 +731,22 @@ export class BoosterManager extends Component {
         this._isRestoring = true;
         TileManager.getInstance().setInputLocked(true);
         this.clearHighlight();
+        OrderManager.getInstance().abortPendingCompletion();
         tray.cancelPendingOrderClearEffects();
         TileManager.getInstance().restoreTilesFromSnapshot(snapshot.tiles);
         tray.restoreSnapshot(snapshot.tray);
         if (snapshot.wrongTray) WrongTrayManager.getInstance()?.restoreSnapshot(snapshot.wrongTray);
-        this.animateUndoReturns(undoReturnStarts, () => {
+
+        let finished = false;
+        const finishRestore = () => {
+            if (finished) return;
+            finished = true;
+            this.unschedule(finishRestore);
             OrderManager.getInstance().restoreSnapshot(snapshot.order);
             if (orderChanged) {
                 OrderTrayManager.getInstance()?.refreshFromOrderManager();
             }
-            TileManager.getInstance().refreshBlockStatus(true);
+            TileManager.getInstance().refreshBlockStatus(false);
             TileManager.getInstance().setInputLocked(false);
             this._isRestoring = false;
 
@@ -753,13 +757,15 @@ export class BoosterManager extends Component {
                 if (TrayManager.getInstance().getFlyCount() > 0) return;
                 OrderManager.getInstance().syncWithSettledTray();
             }, 0);
-        });
+        };
+
+        this.animateUndoReturns(undoReturnStarts, finishRestore);
+        this.scheduleOnce(finishRestore, 0.8);
         return true;
     }
 
     public UseSkipLevel(): boolean {
         if (!LevelManager.getInstance().isLevelActive()) return false;
-        if (this.isSkipBlockedForCurrentLevel()) return false;
         if (!StarWallet.getInstance().trySpend(SKIP_STAR_COST, 'skip')) return false;
 
         this.clearUndoStack();
@@ -967,7 +973,6 @@ export class BoosterManager extends Component {
         } else {
             this._skipCount = Math.min(this._maxSkipCount, SaveManager.getInstance().getSkipCount());
         }
-        if (this.isSkipBlockedForCurrentLevel()) this._skipCount = 0;
         this.emitChanged();
     }
 
@@ -1036,12 +1041,7 @@ export class BoosterManager extends Component {
 
     public canUseSkip(): boolean {
         return LevelManager.getInstance().isLevelActive() &&
-            !this.isSkipBlockedForCurrentLevel() &&
             StarWallet.getInstance().canAfford(SKIP_STAR_COST);
-    }
-
-    private isSkipBlockedForCurrentLevel(): boolean {
-        return isRewardVideoLevel(LevelManager.getInstance().getCurrentLevelId());
     }
 
     private captureSnapshot(): IGameStateSnapshot {

@@ -30,6 +30,7 @@ export class OrderManager {
     private _isPendingTrayCheck: boolean = false;
     private _isCompletingOrder: boolean = false;
     private _submittedTileIds: Set<string> = new Set();
+    private _finalOrderCleared: boolean = false;
     private readonly _trayCheckDelay: number = 0.5;
 
     private constructor() {}
@@ -51,6 +52,8 @@ export class OrderManager {
         this._currentItemIndex = 0;
         this._isActive = true;
         this._isCompletingOrder = false;
+        this._finalOrderCleared = true;
+        EventBus.getInstance().off(GameEvent.ORDER_TILES_CLEARED, this.onOrderTilesClearedForFinalOrder, this);
         this._resetOrderTracking();
         this._submittedTileIds.clear();
         EventBus.getInstance().on(GameEvent.TILE_ADDED_TO_TRAY, this.onTileAddedToTray, this);
@@ -235,25 +238,13 @@ export class OrderManager {
 
         if (willCompleteAllOrders && completedTileIds && completedTileIds.length > 0) {
             this._isCompletingOrder = true;
-            let finalized = false;
-            const finalizeFinalOrder = () => {
-                if (finalized) return;
-                if (!this._isActive || !this._isCompletingOrder) {
-                    return;
-                }
-                finalized = true;
-                this._isCompletingOrder = false;
-                this._currentOrderIndex++;
-                this._currentItemIndex = 0;
-                this._submittedTileIds.clear();
-                EventBus.getInstance().emit(GameEvent.ALL_ORDERS_COMPLETED);
-            };
-
-            EventBus.getInstance().once(GameEvent.ORDER_TILES_CLEARED, finalizeFinalOrder, this);
+            this._finalOrderCleared = false;
+            EventBus.getInstance().off(GameEvent.ORDER_TILES_CLEARED, this.onOrderTilesClearedForFinalOrder, this);
+            EventBus.getInstance().once(GameEvent.ORDER_TILES_CLEARED, this.onOrderTilesClearedForFinalOrder, this);
             AudioManager.getInstance()?.playOrderCompleteSfx();
             EventBus.getInstance().emit(GameEvent.ORDER_COMPLETED, completedOrder, this._currentOrderIndex, completedTileIds);
             if (!TrayManager.getInstance().isClearingOrderTiles()) {
-                setTimeout(finalizeFinalOrder, 0);
+                this.onOrderTilesClearedForFinalOrder();
             }
             return;
         }
@@ -358,15 +349,33 @@ export class OrderManager {
     }
 
     public restoreSnapshot(snapshot: IOrderManagerSnapshot): void {
-        this._clearPendingTrayCheck();
+        this.abortPendingCompletion();
         this._currentOrderIndex = snapshot.currentOrderIndex;
         this._currentItemIndex = snapshot.currentItemIndex;
         this._currentOrderRemainingItems = [...snapshot.currentOrderRemainingItems];
         this._currentOrderMatchedTileIds = [...snapshot.currentOrderMatchedTileIds];
         this._submittedTileIds = new Set(snapshot.submittedTileIds);
-        this._isCompletingOrder = false;
         EventBus.getInstance().emit(GameEvent.ORDER_CHANGED, this.getCurrentOrder(), this._currentOrderIndex);
     }
+
+    /** Undo / reset giữa lúc order đang consume — tránh kẹt tray không clear. */
+    public abortPendingCompletion(): void {
+        this._clearPendingTrayCheck();
+        this._isCompletingOrder = false;
+        this._finalOrderCleared = true;
+        EventBus.getInstance().off(GameEvent.ORDER_TILES_CLEARED, this.onOrderTilesClearedForFinalOrder, this);
+    }
+
+    private onOrderTilesClearedForFinalOrder = (): void => {
+        if (this._finalOrderCleared) return;
+        if (!this._isActive || !this._isCompletingOrder) return;
+        this._finalOrderCleared = true;
+        this._isCompletingOrder = false;
+        this._currentOrderIndex++;
+        this._currentItemIndex = 0;
+        this._submittedTileIds.clear();
+        EventBus.getInstance().emit(GameEvent.ALL_ORDERS_COMPLETED);
+    };
 
     public syncWithSettledTray(): void {
         this.onTraySettled();

@@ -206,16 +206,40 @@ export class SmartLevelGenerator {
         return LevelGenerator.SHAPES[this.SHAPE_NAMES[index]];
     }
 
+    /**
+     * Curve 50 level / 13 clip: 1–5 rất dễ, 6–12 dễ, 13–20 vừa,
+     * 21–32 khó, 33–50 rất khó (thúc Hint 8★ / Undo 3★ / Skip 40★).
+     * Chỉ ảnh hưởng level generate mới — JSON sẵn trong resources vẫn giữ board cũ.
+     */
     public static getDifficultyForLevel(levelId: number): IDifficultyConfig {
+        const id = Math.max(1, Math.floor(levelId));
+        const layerCount = id <= 12 ? 2 : id <= 28 ? 3 : 4;
+        const tileTypeCount = id <= 5
+            ? 3
+            : Math.min(4 + Math.floor((id - 1) / 8), ITEM_ID_COUNT);
+        const totalTriplets = id <= 5
+            ? 4
+            : id <= 12
+                ? 6
+                : Math.min(8 + Math.floor((id - 12) / 4), 16);
+        const safeMoveWindow = id <= 5 ? 4 : id <= 12 ? 3 : id <= 28 ? 2 : 1;
+        const trapRate = id <= 5
+            ? 0.04
+            : id <= 12
+                ? 0.10
+                : Math.min(0.16 + (id - 12) * 0.012, 0.55);
+        const visibleTripletLimit = id <= 12 ? 3 : id <= 28 ? 2 : 1;
+        const coverThreshold = id <= 12 ? 0.22 : id <= 28 ? 0.30 : 0.36;
+
         return {
-            difficulty: levelId,
-            layerCount: levelId <= 10 ? 2 : levelId <= 30 ? 3 : 4,
-            tileTypeCount: Math.min(4 + Math.floor(levelId / 10), ITEM_ID_COUNT),
-            totalTriplets: Math.min(6 + Math.floor(levelId / 5), 15),
-            safeMoveWindow: Math.max(1, 4 - Math.floor(levelId / 15)),
-            trapRate: Math.min(0.15 + levelId * 0.005, 0.5),
-            visibleTripletLimit: Math.max(1, 3 - Math.floor(levelId / 20)),
-            coverThreshold: 0.3,
+            difficulty: id,
+            layerCount,
+            tileTypeCount,
+            totalTriplets,
+            safeMoveWindow,
+            trapRate,
+            visibleTripletLimit,
+            coverThreshold,
         };
     }
 

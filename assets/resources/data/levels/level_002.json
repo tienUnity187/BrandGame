@@ -25,10 +25,10 @@
     "jitterMode": "layer_visible_mixed_shape",
     "blockMode": "overlap",
     "minBlockOverlapPixels": 1,
-    "coverThreshold": 0.08,
-    "blockOverlapWidthRatio": 0.45,
-    "blockOverlapHeightRatio": 0.07,
-    "blockOverlapAreaRatio": 0.02,
+    "coverThreshold": 0.18,
+    "blockOverlapWidthRatio": 0.5,
+    "blockOverlapHeightRatio": 0.1,
+    "blockOverlapAreaRatio": 0.04,
     "shapePattern": [
       [
         1,
@@ -70,7 +70,7 @@
   "orderConfig": {
     "orderSize": 3,
     "orderMode": "EXACT_ORDER",
-    "wrongTrayMaxSlots": 3,
+    "wrongTrayMaxSlots": 4,
     "consumeWrongTile": true
   },
   "orders": [

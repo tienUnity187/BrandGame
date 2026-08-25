@@ -4,8 +4,8 @@
   "defaultSkin": "uma",
   "gameMode": "ORDER_MATCH",
   "startingBoosters": {
-    "HINT": 4,
-    "UNDO": 4,
+    "HINT": 0,
+    "UNDO": 0,
     "SKIP": 0
   },
   "board": {
@@ -25,7 +25,7 @@
     "jitterMode": "layer_visible_mixed_shape",
     "blockMode": "overlap",
     "minBlockOverlapPixels": 1,
-    "coverThreshold": 0.08,
+    "coverThreshold": 0.04,
     "blockOverlapWidthRatio": 0.45,
     "blockOverlapHeightRatio": 0.07,
     "blockOverlapAreaRatio": 0.02,
@@ -70,7 +70,7 @@
   "orderConfig": {
     "orderSize": 3,
     "orderMode": "EXACT_ORDER",
-    "wrongTrayMaxSlots": 1,
+    "wrongTrayMaxSlots": 2,
     "consumeWrongTile": true
   },
   "orders": [

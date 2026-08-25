@@ -1,4 +1,4 @@
-import { _decorator, Component, director, Node, Prefab, resources, input, Input, KeyCode, EventKeyboard, UITransform, EditBox, Button, Label, view, ResolutionPolicy, tween, UIOpacity, Vec3, Tween } from 'cc';
+import { _decorator, Component, director, instantiate, Node, Prefab, resources, input, Input, KeyCode, EventKeyboard, UITransform, EditBox, Button, Label, view, ResolutionPolicy, tween, UIOpacity, Vec3, Tween } from 'cc';
 import { EDITOR, PREVIEW } from 'cc/env';
 import { GameState } from '../enums/GameState';
 import { GameEvent } from '../enums/GameEvent';
@@ -27,10 +27,15 @@ import { RewardVideoGalleryPanel } from '../ui/RewardVideoGalleryPanel';
 import { RewardVideoPlayer } from '../ui/RewardVideoPlayer';
 import { TeviPaymentService } from '../services/TeviPaymentService';
 import { StarWalletHud } from '../ui/StarWalletHud';
+import { NoticePopupPanel } from '../ui/NoticePopupPanel';
 
 const { ccclass, property } = _decorator;
 const WIN_CURRENT_LEVEL_CHEAT_KEY_CODE = 84; // T
 const BOOSTER_CHEAT_KEY_CODE = 66; // B
+const FINAL_LEVEL_ID = 50;
+const FINAL_LEVEL_NOTICE_TITLE = 'Level 50 Complete!';
+const FINAL_LEVEL_NOTICE_MESSAGE =
+    'Stay tuned for the next update to unlock more exciting videos!';
 
 /**
  * GameManager - Entry point controller, quản lý vòng đời game.
@@ -233,48 +238,90 @@ export class GameManager extends Component {
         try {
             this.stopTimer();
             // Thắng rồi: lưu level tiếp theo để mở lại game tiếp tục đúng tiến trình.
-            const nextLevelId = Math.min(50, Math.max(1, levelId + 1));
+            const nextLevelId = Math.min(FINAL_LEVEL_ID, Math.max(1, levelId + 1));
             SaveManager.getInstance().saveCurrentLevel(nextLevelId);
+
+            if (levelId >= FINAL_LEVEL_ID) {
+                await this.handleFinalLevelCompleted(levelId);
+                return;
+            }
+
             const panel = await UIManager.getInstance().openPanel('LevelCompletePanel', { levelId, score, stars, elapsedSeconds: this._elapsedSeconds });
             if (!panel) {
                 this.returnToMenu();
                 return;
             }
 
-            // Thắng mốc 5/10/15/25/38/50 thì mở clip thưởng tương ứng trên R2.
-            const isRewardLevel = isRewardVideoLevel(levelId);
-            const videoFile = isRewardLevel ? getRewardVideoFileName(levelId) : null;
-            console.log('[RewardVideo][LevelComplete]', {
-                levelId,
-                unlockLevels: REWARD_VIDEO_UNLOCK_LEVELS,
-                isRewardLevel,
-                videoFile,
-                willCallWorker: isRewardLevel,
-                tokenUrl: REWARD_VIDEO_TOKEN_URL,
-                requestBody: videoFile ? { file: videoFile } : null,
-            });
-
-            if (isRewardLevel && videoFile) {
-                this.ensureRewardVideoPlayer();
-                TeviLoginManager.Instance?.setDebugStatus(
-                    `Level ${levelId} xong → xin video ${videoFile}...`,
-                );
-                console.log(
-                    `[RewardVideo][LevelComplete] OK → playSecretVideo("${videoFile}")`,
-                );
-                RewardVideoPlayer.Instance?.playSecretVideo(videoFile, () => {
-                    // Chỉ chạy khi user xem xong/bấm X sau khi video đã PLAYING.
-                    // Lưu local + cập nhật list Clip được xử lý trong RewardVideoPlayer.
-                    TeviLoginManager.Instance?.setDebugStatus('Đã đóng video (xem xong/X), tiếp tục game.');
-                    console.log('[RewardVideo] Đã đóng video, tiếp tục game.');
-                }, levelId);
-            } else {
-                console.log(
-                    `[RewardVideo][LevelComplete] Skip video (level ${levelId} không nằm trong ${REWARD_VIDEO_UNLOCK_LEVELS.join('/')})`,
-                );
-            }
+            // Thắng mốc clip thì mở video thưởng tương ứng trên R2.
+            this.playRewardVideoIfNeeded(levelId);
         } catch (err) {
             this.returnToMenu();
+        }
+    }
+
+    /** Level 50: bỏ popup win prefab — dùng panel_notice (chỉnh trong Editor). */
+    private async handleFinalLevelCompleted(levelId: number): Promise<void> {
+        this.ensureNoticePopupPanel();
+        const showComingSoonNotice = (): void => {
+            NoticePopupPanel.Instance?.show(
+                FINAL_LEVEL_NOTICE_TITLE,
+                FINAL_LEVEL_NOTICE_MESSAGE,
+                () => this.returnToMenu(),
+            );
+        };
+
+        // Editor/Preview: không có Tevi token → bỏ qua video, hiện thông báo ngay.
+        if (EDITOR || PREVIEW) {
+            showComingSoonNotice();
+            return;
+        }
+
+        const isRewardLevel = isRewardVideoLevel(levelId);
+        const videoFile = isRewardLevel ? getRewardVideoFileName(levelId) : null;
+        if (isRewardLevel && videoFile) {
+            this.ensureRewardVideoPlayer();
+            TeviLoginManager.Instance?.setDebugStatus(
+                `Level ${levelId} xong → xin video ${videoFile}...`,
+            );
+            RewardVideoPlayer.Instance?.playSecretVideo(videoFile, () => {
+                TeviLoginManager.Instance?.setDebugStatus('Đã đóng video level 50 — hiện thông báo coming soon.');
+                showComingSoonNotice();
+            }, levelId);
+            return;
+        }
+
+        showComingSoonNotice();
+    }
+
+    private playRewardVideoIfNeeded(levelId: number): void {
+        const isRewardLevel = isRewardVideoLevel(levelId);
+        const videoFile = isRewardLevel ? getRewardVideoFileName(levelId) : null;
+        console.log('[RewardVideo][LevelComplete]', {
+            levelId,
+            unlockLevels: REWARD_VIDEO_UNLOCK_LEVELS,
+            isRewardLevel,
+            videoFile,
+            willCallWorker: isRewardLevel,
+            tokenUrl: REWARD_VIDEO_TOKEN_URL,
+            requestBody: videoFile ? { file: videoFile } : null,
+        });
+
+        if (isRewardLevel && videoFile) {
+            this.ensureRewardVideoPlayer();
+            TeviLoginManager.Instance?.setDebugStatus(
+                `Level ${levelId} xong → xin video ${videoFile}...`,
+            );
+            console.log(
+                `[RewardVideo][LevelComplete] OK → playSecretVideo("${videoFile}")`,
+            );
+            RewardVideoPlayer.Instance?.playSecretVideo(videoFile, () => {
+                TeviLoginManager.Instance?.setDebugStatus('Đã đóng video (xem xong/X), tiếp tục game.');
+                console.log('[RewardVideo] Đã đóng video, tiếp tục game.');
+            }, levelId);
+        } else {
+            console.log(
+                `[RewardVideo][LevelComplete] Skip video (level ${levelId} không nằm trong ${REWARD_VIDEO_UNLOCK_LEVELS.join('/')})`,
+            );
         }
     }
 
@@ -325,6 +372,7 @@ export class GameManager extends Component {
         this.ensureOrderManagers();
         this.ensureRewardVideoPlayer();
         this.ensureStarWalletHud();
+        this.ensureNoticePopupPanel();
         // Editor: in sẵn bảng map level→file để xác nhận wiring đúng (không cần máy thật).
         logRewardVideoFilePlan('[RewardVideo][Boot]');
         console.log('[RewardVideo][Boot] Token endpoint =', REWARD_VIDEO_TOKEN_URL);
@@ -862,7 +910,7 @@ export class GameManager extends Component {
         rewardNode.setSiblingIndex(parent.children.length - 1);
     }
 
-    /** HUD ★ + panel sandbox nạp Star (tự tạo runtime, luôn trên cùng). */
+    /** HUD ★ trên Canvas (kéo thả StarTopBar trong editor). */
     private ensureStarWalletHud(): void {
         const existing = StarWalletHud.Instance
             || director.getScene()?.getComponentInChildren(StarWalletHud)
@@ -881,6 +929,37 @@ export class GameManager extends Component {
         hudNode.setPosition(0, 0, 0);
         hudNode.addComponent(StarWalletHud);
         hudNode.setSiblingIndex(parent.children.length - 1);
+    }
+
+    /** Popup thông báo (level 50 / top-up) — prefab `prefabs/ui/panel_notice`, kéo vào Canvas để chỉnh. */
+    private ensureNoticePopupPanel(): void {
+        const existing = NoticePopupPanel.Instance
+            || director.getScene()?.getComponentInChildren(NoticePopupPanel)
+            || null;
+        if (existing?.node?.isValid) {
+            NoticePopupPanel.Instance = existing;
+            return;
+        }
+
+        const canvas = director.getScene()?.getChildByName('Canvas');
+        const parent = canvas?.isValid ? canvas : this.uiRoot || this.node;
+        resources.load('prefabs/ui/panel_notice', Prefab, (err, prefab) => {
+            if (err || !prefab) {
+                console.warn(
+                    '[GameManager] Không load được prefabs/ui/panel_notice. Kéo prefab panel_notice vào Canvas trong Editor.',
+                    err,
+                );
+                return;
+            }
+            if (NoticePopupPanel.Instance?.node?.isValid) return;
+            const node = instantiate(prefab);
+            node.name = 'NoticePopupPanel';
+            node.setParent(parent);
+            node.setPosition(0, 0, 0);
+            node.layer = parent.layer;
+            node.active = false;
+            console.log('[GameManager] Đã spawn NoticePopupPanel từ prefab — mở prefab/scene để chỉnh layout.');
+        });
     }
 
     private ensureOpacity(node: Node): UIOpacity {

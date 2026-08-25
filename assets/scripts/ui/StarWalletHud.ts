@@ -4,10 +4,14 @@ import {
     Button,
     Color,
     Component,
+    director,
     Graphics,
+    instantiate,
     Label,
     Layers,
     Node,
+    Prefab,
+    resources,
     UITransform,
     Widget,
     view,
@@ -20,15 +24,35 @@ import { StarWallet } from '../services/StarWallet';
 import { TeviPaymentService, PurchasePackOptions } from '../services/TeviPaymentService';
 import { TopUpPendingStore } from '../services/TopUpPendingStore';
 import { TeviLoginManager } from '../TeviLoginManager';
+import { NoticePopupPanel } from './NoticePopupPanel';
+import { TopUpResultPopupPanel } from './TopUpResultPopupPanel';
 
-const { ccclass } = _decorator;
+const { ccclass, property } = _decorator;
 
 /**
- * HUD Star luôn hiện trên cùng + panel sandbox nạp Star (tự tạo runtime).
+ * HUD Star trên Canvas: bar + panel nạp kéo thả trong editor.
  */
 @ccclass('StarWalletHud')
 export class StarWalletHud extends Component {
     public static Instance: StarWalletHud | null = null;
+
+    @property({ type: Node, tooltip: 'Bar ★ (Balance + Top Up) trên Canvas.' })
+    public topBar: Node | null = null;
+
+    @property({ type: Label, tooltip: 'Label số dư trên bar.' })
+    public balanceLabel: Label | null = null;
+
+    @property({ type: Button, tooltip: 'Nút mở panel nạp.' })
+    public openShopButton: Button | null = null;
+
+    @property({ type: Node, tooltip: 'Panel nạp Star — kéo thả / chỉnh layout trong editor.' })
+    public shopPanel: Node | null = null;
+
+    @property({ type: Button, tooltip: 'Nút đóng panel nạp.' })
+    public closeShopButton: Button | null = null;
+
+    @property({ type: Label, tooltip: 'Label status debug (optional).' })
+    public statusLabel: Label | null = null;
 
     private _balanceLabel: Label | null = null;
     private _statusLabel: Label | null = null;
@@ -38,6 +62,7 @@ export class StarWalletHud extends Component {
     private _pendingBannerRoot: Node | null = null;
     private _pendingBannerLabel: Label | null = null;
     private _resultPopupRoot: Node | null = null;
+    private _resultPopupOnClose: (() => void) | null = null;
     private _openShopButton: Button | null = null;
     private _built = false;
     /** Giữ vài dòng status gần nhất — tránh mất JWT.app vì chạy quá nhanh. */
@@ -58,6 +83,7 @@ export class StarWalletHud extends Component {
         EventBus.getInstance().on(GameEvent.PENDING_TOPUP_CLAIMED, this.onPendingTopUpClaimed, this);
         this.scheduleOnce(() => this.checkPendingTopUpOnBoot(), 1);
         this.flushQueuedClaimPopup();
+        this.ensureTopUpResultPopup();
     }
 
     /**
@@ -113,11 +139,11 @@ export class StarWalletHud extends Component {
         const title = fromPreviousPurchase ? 'Top-up received!' : 'Top-up successful!';
         const message = fromPreviousPurchase
             ? 'Your payment was confirmed.\n\n'
-                + `+${stars}★ added to your wallet!\n`
-                + `Total: ${balance}★`
-            : `+${stars}★ added!\nTotal: ${balance}★`;
+                + `+${stars} added to your wallet!\n`
+                + `Total: ${balance}`
+            : `+${stars} added!\nTotal: ${balance}`;
         this.showResultPopup(title, message);
-        StarWalletHud.logStatus(`Popup: ${title} +${stars}★`);
+        StarWalletHud.logStatus(`Popup: ${title} +${stars}`);
     }
 
     protected onDestroy(): void {
@@ -144,13 +170,13 @@ export class StarWalletHud extends Component {
     public refreshBalance(): void {
         const balance = StarWallet.getInstance().getBalance();
         if (this._balanceLabel) {
-            this._balanceLabel.string = `★ ${balance}`;
+            this._balanceLabel.string = `${balance}`;
         }
     }
 
     private onBalanceChanged(balance: number): void {
         if (this._balanceLabel) {
-            this._balanceLabel.string = `★ ${balance}`;
+            this._balanceLabel.string = `${balance}`;
         }
     }
 
@@ -212,152 +238,179 @@ export class StarWalletHud extends Component {
         if (this._built) return;
         this._built = true;
 
-        const design = view.getDesignResolutionSize();
-        const width = design.width || 1080;
-        const height = design.height || 1920;
-
         const root = this.node;
         root.layer = Layers.Enum.UI_2D;
-        let rootTransform = root.getComponent(UITransform);
-        if (!rootTransform) rootTransform = root.addComponent(UITransform);
-        rootTransform.setContentSize(width, height);
+        if (!root.getComponent(UITransform)) root.addComponent(UITransform);
 
-        // --- Top bar balance + open shop ---
+        this.bindEditorTopBar();
+        if (!this._balanceLabel || !this._openShopButton) {
+            this.createRuntimeTopBar();
+        } else if (this._openShopButton.node?.isValid) {
+            this._openShopButton.node.off(Button.EventType.CLICK, this.openShop, this);
+            this._openShopButton.node.on(Button.EventType.CLICK, this.openShop, this);
+        }
+
+        this.bindEditorShop();
+    }
+
+    private bindEditorShop(): void {
+        if (!this.shopPanel?.isValid) {
+            this.shopPanel = this.node.getChildByName('StarShopPanel');
+        }
+        if (!this.shopPanel?.isValid) {
+            console.warn('[StarWalletHud] Chưa gán StarShopPanel — tạo panel trong editor và kéo vào shopPanel.');
+            return;
+        }
+
+        this._shopRoot = this.shopPanel;
+        this.shopPanel.active = false;
+
+        if (!this.closeShopButton?.node?.isValid) {
+            this.closeShopButton = this.shopPanel.getChildByName('BtnCloseShop')?.getComponent(Button) || null;
+        }
+        if (!this.statusLabel?.node?.isValid) {
+            this.statusLabel = this.shopPanel.getChildByName('Status')?.getComponent(Label)
+                || this.shopPanel.getChildByPath('Panel/Status')?.getComponent(Label)
+                || null;
+        }
+        this._statusLabel = this.statusLabel;
+
+        if (this.closeShopButton?.node?.isValid) {
+            this.closeShopButton.node.off(Button.EventType.CLICK, this.closeShop, this);
+            this.closeShopButton.node.on(Button.EventType.CLICK, this.closeShop, this);
+        }
+
+        this.bindPackButtons(this.shopPanel);
+        const panel = this.shopPanel.getChildByName('Panel');
+        if (panel?.isValid) {
+            this.bindPackButtons(panel);
+        }
+    }
+
+    private bindPackButtons(root: Node): void {
+        for (const pack of STAR_TOPUP_PACKS) {
+            const btnNode = root.getChildByName(`Btn_${pack.id}`);
+            if (!btnNode?.isValid) continue;
+            const btn = btnNode.getComponent(Button);
+            if (!btn) continue;
+            btnNode.off(Button.EventType.CLICK);
+            btnNode.on(Button.EventType.CLICK, () => void this.onPurchaseClicked(pack.id), this);
+
+            if (EDITOR || PREVIEW) {
+                const mockNode = root.getChildByName(`Mock_${pack.id}`);
+                if (mockNode?.isValid) {
+                    mockNode.off(Button.EventType.CLICK);
+                    mockNode.on(Button.EventType.CLICK, () => this.onMockClicked(pack.id), this);
+                }
+            }
+        }
+
+        const clearNode = root.getChildByName('BtnClearToken')
+            || root.getChildByPath('Panel/BtnClearToken');
+        if (clearNode?.isValid) {
+            clearNode.off(Button.EventType.CLICK, this.onClearTokenClicked, this);
+            clearNode.on(Button.EventType.CLICK, this.onClearTokenClicked, this);
+        }
+    }
+
+    private bindEditorTopBar(): void {
+        if (!this.topBar?.isValid) {
+            this.topBar = this.node.getChildByName('StarTopBar');
+        }
+        if (!this.balanceLabel && this.topBar?.isValid) {
+            this.balanceLabel = this.topBar.getChildByName('BalanceLabel')?.getComponent(Label) || null;
+        }
+        if (!this.openShopButton && this.topBar?.isValid) {
+            this.openShopButton = this.topBar.getChildByName('BtnOpenShop')?.getComponent(Button) || null;
+        }
+        this._balanceLabel = this.balanceLabel;
+        this._openShopButton = this.openShopButton;
+    }
+
+    /** Fallback khi chưa kéo bar trên editor — ghim top-right Canvas. */
+    private createRuntimeTopBar(): void {
         const topBar = new Node('StarTopBar');
         topBar.layer = Layers.Enum.UI_2D;
-        topBar.setParent(root);
+        topBar.setParent(this.node);
         const topTransform = topBar.addComponent(UITransform);
-        topTransform.setContentSize(420, 72);
-        topBar.setPosition(0, height * 0.5 - 56, 0);
+        topTransform.setContentSize(300, 64);
+        this.alignToCanvas(topBar, { top: 16, right: 16 });
 
         const topBg = topBar.addComponent(Graphics);
-        topBg.fillColor = new Color(20, 20, 28, 180);
-        topBg.roundRect(-210, -36, 420, 72, 16);
+        topBg.fillColor = new Color(20, 20, 28, 200);
+        topBg.roundRect(-150, -32, 300, 64, 14);
         topBg.fill();
 
         const balanceNode = new Node('BalanceLabel');
         balanceNode.layer = Layers.Enum.UI_2D;
         balanceNode.setParent(topBar);
         const balanceTransform = balanceNode.addComponent(UITransform);
-        balanceTransform.setContentSize(240, 60);
-        balanceNode.setPosition(-60, 0, 0);
+        balanceTransform.setContentSize(170, 52);
+        balanceNode.setPosition(-58, 0, 0);
         this._balanceLabel = balanceNode.addComponent(Label);
-        this._balanceLabel.string = '★ 0';
-        this._balanceLabel.fontSize = 36;
-        this._balanceLabel.lineHeight = 40;
+        this._balanceLabel.string = '0';
+        this._balanceLabel.fontSize = 30;
+        this._balanceLabel.lineHeight = 34;
         this._balanceLabel.color = new Color(255, 220, 90, 255);
         this._balanceLabel.horizontalAlign = Label.HorizontalAlign.CENTER;
         this._balanceLabel.verticalAlign = Label.VerticalAlign.CENTER;
 
-        const openNode = this.createButton(topBar, 'BtnOpenShop', 'Top Up', 120, 56, 110, 0);
+        const openNode = this.createButton(topBar, 'BtnOpenShop', 'Top Up', 108, 48, 86, 0);
         this._openShopButton = openNode.getComponent(Button);
         openNode.on(Button.EventType.CLICK, this.openShop, this);
 
-        // --- Shop overlay ---
-        const shop = new Node('StarShopPanel');
-        shop.layer = Layers.Enum.UI_2D;
-        shop.setParent(root);
-        shop.active = false;
-        this._shopRoot = shop;
+        this.topBar = topBar;
+        this.balanceLabel = this._balanceLabel;
+        this.openShopButton = this._openShopButton;
+    }
 
-        const shopTransform = shop.addComponent(UITransform);
-        shopTransform.setContentSize(width, height);
-        const shopWidget = shop.addComponent(Widget);
-        shopWidget.isAlignTop = true;
-        shopWidget.isAlignBottom = true;
-        shopWidget.isAlignLeft = true;
-        shopWidget.isAlignRight = true;
-        shopWidget.top = 0;
-        shopWidget.bottom = 0;
-        shopWidget.left = 0;
-        shopWidget.right = 0;
-        shopWidget.alignMode = Widget.AlignMode.ON_WINDOW_RESIZE;
-        shop.addComponent(BlockInputEvents);
+    private getCanvasNode(): Node | null {
+        const parent = this.node.parent;
+        if (parent?.isValid && parent.name === 'Canvas') return parent;
+        return director.getScene()?.getChildByName('Canvas') ?? parent ?? null;
+    }
 
-        const overlay = new Node('Overlay');
-        overlay.layer = Layers.Enum.UI_2D;
-        overlay.setParent(shop);
-        const overlayTransform = overlay.addComponent(UITransform);
-        overlayTransform.setContentSize(width, height);
-        const overlayGfx = overlay.addComponent(Graphics);
-        overlayGfx.fillColor = new Color(0, 0, 0, 200);
-        overlayGfx.rect(-width * 0.5, -height * 0.5, width, height);
-        overlayGfx.fill();
+    /** Modal full-screen trên Canvas — luôn trên cùng, chặn tap xuống game. */
+    private mountModalOnCanvas(modal: Node): void {
+        const canvas = this.getCanvasNode();
+        if (!canvas?.isValid || !modal?.isValid) return;
+        modal.setParent(canvas);
+        modal.setPosition(0, 0, 0);
+        modal.layer = canvas.layer;
+        this.alignToCanvas(modal, { fullStretch: true });
+        modal.setSiblingIndex(canvas.children.length - 1);
+        const widget = modal.getComponent(Widget);
+        widget?.updateAlignment();
+    }
 
-        const panel = new Node('Panel');
-        panel.layer = Layers.Enum.UI_2D;
-        panel.setParent(shop);
-        const panelTransform = panel.addComponent(UITransform);
-        panelTransform.setContentSize(640, 720);
-        const panelGfx = panel.addComponent(Graphics);
-        panelGfx.fillColor = new Color(32, 28, 40, 245);
-        panelGfx.roundRect(-320, -360, 640, 720, 24);
-        panelGfx.fill();
-
-        const titleNode = new Node('Title');
-        titleNode.layer = Layers.Enum.UI_2D;
-        titleNode.setParent(panel);
-        const titleTransform = titleNode.addComponent(UITransform);
-        titleTransform.setContentSize(560, 64);
-        titleNode.setPosition(0, 280, 0);
-        const title = titleNode.addComponent(Label);
-        title.string = 'Sandbox Top Up Stars';
-        title.fontSize = 40;
-        title.lineHeight = 48;
-        title.color = Color.WHITE;
-        title.horizontalAlign = Label.HorizontalAlign.CENTER;
-
-        const statusNode = new Node('Status');
-        statusNode.layer = Layers.Enum.UI_2D;
-        statusNode.setParent(panel);
-        const statusTransform = statusNode.addComponent(UITransform);
-        statusTransform.setContentSize(560, 140);
-        statusNode.setPosition(0, 210, 0);
-        this._statusLabel = statusNode.addComponent(Label);
-        this._statusLabel.string = this.isEditorOrPreview()
-            ? 'Editor: packs/Mock are simulated. Step-by-step status appears here.'
-            : 'Tevi build: top up via top-up-signature + TeviJS.topup. Status appears here.';
-        this._statusLabel.fontSize = 20;
-        this._statusLabel.lineHeight = 26;
-        this._statusLabel.overflow = Label.Overflow.RESIZE_HEIGHT;
-        this._statusLabel.enableWrapText = true;
-        this._statusLabel.color = new Color(200, 200, 210, 255);
-        this._statusLabel.horizontalAlign = Label.HorizontalAlign.CENTER;
-        this._statusLabel.verticalAlign = Label.VerticalAlign.TOP;
-
-        const showMockButtons = EDITOR || PREVIEW;
-        let y = 80;
-        for (const pack of STAR_TOPUP_PACKS) {
-            const btn = this.createButton(panel, `Btn_${pack.id}`, pack.label, 480, 72, 0, y);
-            btn.on(Button.EventType.CLICK, () => void this.onPurchaseClicked(pack.id), this);
-
-            // Mock chỉ hiện Editor/Preview — bản build Tevi thật không có nút cộng ★ miễn phí.
-            if (showMockButtons) {
-                const mockBtn = this.createButton(
-                    panel,
-                    `Mock_${pack.id}`,
-                    `Mock ${pack.stars}★`,
-                    200,
-                    48,
-                    0,
-                    y - 56,
-                );
-                const mockLabel = mockBtn.getComponentInChildren(Label);
-                if (mockLabel) mockLabel.fontSize = 22;
-                mockBtn.on(Button.EventType.CLICK, () => this.onMockClicked(pack.id), this);
-                y -= 140;
-            } else {
-                y -= 96;
-            }
+    private alignToCanvas(
+        node: Node,
+        opts: { top?: number; right?: number; fullStretch?: boolean; topCenter?: boolean } = {},
+    ): void {
+        const canvas = this.getCanvasNode();
+        let widget = node.getComponent(Widget);
+        if (!widget) widget = node.addComponent(Widget);
+        if (canvas?.isValid) widget.target = canvas;
+        widget.alignMode = Widget.AlignMode.ON_WINDOW_RESIZE;
+        if (opts.fullStretch) {
+            widget.isAlignTop = widget.isAlignBottom = widget.isAlignLeft = widget.isAlignRight = true;
+            widget.isAlignHorizontalCenter = false;
+            widget.top = widget.bottom = widget.left = widget.right = 0;
+            return;
         }
-
-        const clearBtn = this.createButton(panel, 'BtnClearToken', 'Clear Token', 240, 56, 0, -280);
-        const clearLabel = clearBtn.getComponentInChildren(Label);
-        if (clearLabel) clearLabel.fontSize = 24;
-        clearBtn.on(Button.EventType.CLICK, this.onClearTokenClicked, this);
-
-        const closeBtn = this.createButton(panel, 'BtnCloseShop', 'Close', 200, 64, 0, -350);
-        closeBtn.on(Button.EventType.CLICK, this.closeShop, this);
+        widget.isAlignBottom = false;
+        widget.isAlignLeft = false;
+        widget.isAlignTop = true;
+        widget.top = opts.top ?? 16;
+        if (opts.topCenter) {
+            widget.isAlignRight = false;
+            widget.isAlignHorizontalCenter = true;
+            widget.horizontalCenter = 0;
+            return;
+        }
+        widget.isAlignHorizontalCenter = false;
+        widget.isAlignRight = true;
+        widget.right = opts.right ?? 16;
     }
 
     private onClearTokenClicked(): void {
@@ -411,7 +464,10 @@ export class StarWalletHud extends Component {
     }
 
     private openShop(): void {
-        if (!this._shopRoot) return;
+        if (!this._shopRoot?.isValid) {
+            console.warn('[StarWalletHud] StarShopPanel chưa được gán trong editor.');
+            return;
+        }
         this._shopRoot.active = true;
         const jwtApp = TeviLoginManager.Instance?.getTokenAppId() || '(chưa login)';
         this.resetStatusLog(
@@ -436,7 +492,12 @@ export class StarWalletHud extends Component {
     }
 
     private ensureWaitingOverlay(): void {
-        if (this._waitingRoot) return;
+        if (this._waitingRoot?.isValid && this._waitingRoot.getChildByName('Dim')) return;
+        if (this._waitingRoot?.isValid) {
+            this._waitingRoot.destroy();
+            this._waitingRoot = null;
+            this._waitingLabel = null;
+        }
 
         const design = view.getDesignResolutionSize();
         const width = design.width || 1080;
@@ -444,18 +505,21 @@ export class StarWalletHud extends Component {
 
         const overlay = new Node('TopUpWaiting');
         overlay.layer = Layers.Enum.UI_2D;
-        overlay.setParent(this.node);
+        overlay.setParent(this.getCanvasNode() ?? this.node);
         overlay.active = false;
-        overlay.addComponent(BlockInputEvents);
 
         const transform = overlay.addComponent(UITransform);
         transform.setContentSize(width, height);
-        const widget = overlay.addComponent(Widget);
-        widget.isAlignTop = widget.isAlignBottom = widget.isAlignLeft = widget.isAlignRight = true;
-        widget.top = widget.bottom = widget.left = widget.right = 0;
-        widget.alignMode = Widget.AlignMode.ON_WINDOW_RESIZE;
+        overlay.addComponent(BlockInputEvents);
+        this.alignToCanvas(overlay, { fullStretch: true });
 
-        const bgGfx = overlay.addComponent(Graphics);
+        const dim = new Node('Dim');
+        dim.layer = Layers.Enum.UI_2D;
+        dim.setParent(overlay);
+        const dimTransform = dim.addComponent(UITransform);
+        dimTransform.setContentSize(width, height);
+        dim.addComponent(BlockInputEvents);
+        const bgGfx = dim.addComponent(Graphics);
         bgGfx.fillColor = new Color(0, 0, 0, 210);
         bgGfx.rect(-width * 0.5, -height * 0.5, width, height);
         bgGfx.fill();
@@ -480,8 +544,10 @@ export class StarWalletHud extends Component {
     private showWaiting(message: string): void {
         this.ensureWaitingOverlay();
         if (this._waitingLabel) this._waitingLabel.string = message;
-        if (this._waitingRoot) this._waitingRoot.active = true;
-        this.bringToFront();
+        if (this._waitingRoot) {
+            this.mountModalOnCanvas(this._waitingRoot);
+            this._waitingRoot.active = true;
+        }
     }
 
     private hideWaiting(): void {
@@ -491,10 +557,6 @@ export class StarWalletHud extends Component {
     private ensurePendingBanner(): void {
         if (this._pendingBannerRoot) return;
 
-        const design = view.getDesignResolutionSize();
-        const width = design.width || 1080;
-        const height = design.height || 1920;
-
         const banner = new Node('TopUpPendingBanner');
         banner.layer = Layers.Enum.UI_2D;
         banner.setParent(this.node);
@@ -502,7 +564,7 @@ export class StarWalletHud extends Component {
 
         const transform = banner.addComponent(UITransform);
         transform.setContentSize(640, 120);
-        banner.setPosition(0, height * 0.5 - 180, 0);
+        this.alignToCanvas(banner, { top: 96, topCenter: true });
 
         const bgGfx = banner.addComponent(Graphics);
         bgGfx.fillColor = new Color(30, 120, 70, 230);
@@ -537,6 +599,37 @@ export class StarWalletHud extends Component {
         if (this._pendingBannerRoot) this._pendingBannerRoot.active = false;
     }
 
+    /** Popup top-up (thiếu sao / failed / success) — prefab `panel_topup_result`. */
+    private ensureTopUpResultPopup(): void {
+        const existing = TopUpResultPopupPanel.Instance
+            || director.getScene()?.getComponentInChildren(TopUpResultPopupPanel)
+            || null;
+        if (existing?.node?.isValid) {
+            TopUpResultPopupPanel.Instance = existing;
+            return;
+        }
+
+        const canvas = this.getCanvasNode();
+        const parent = canvas?.isValid ? canvas : this.node;
+        resources.load('prefabs/ui/panel_topup_result', Prefab, (err, prefab) => {
+            if (err || !prefab) {
+                console.warn(
+                    '[StarWalletHud] Không load panel_topup_result — dùng popup runtime fallback.',
+                    err,
+                );
+                return;
+            }
+            if (TopUpResultPopupPanel.Instance?.node?.isValid) return;
+            const node = instantiate(prefab);
+            node.name = 'TopUpResultPopupPanel';
+            node.setParent(parent);
+            node.setPosition(0, 0, 0);
+            node.layer = parent.layer;
+            node.active = false;
+            console.log('[StarWalletHud] Spawn TopUpResultPopupPanel từ prefab.');
+        });
+    }
+
     private ensureResultPopup(): void {
         if (this._resultPopupRoot) return;
 
@@ -546,22 +639,20 @@ export class StarWalletHud extends Component {
 
         const popup = new Node('TopUpResultPopup');
         popup.layer = Layers.Enum.UI_2D;
-        popup.setParent(this.node);
+        popup.setParent(this.getCanvasNode() ?? this.node);
         popup.active = false;
-        popup.addComponent(BlockInputEvents);
 
         const rootTransform = popup.addComponent(UITransform);
         rootTransform.setContentSize(width, height);
-        const widget = popup.addComponent(Widget);
-        widget.isAlignTop = widget.isAlignBottom = widget.isAlignLeft = widget.isAlignRight = true;
-        widget.top = widget.bottom = widget.left = widget.right = 0;
-        widget.alignMode = Widget.AlignMode.ON_WINDOW_RESIZE;
+        popup.addComponent(BlockInputEvents);
+        this.alignToCanvas(popup, { fullStretch: true });
 
         const dim = new Node('Dim');
         dim.layer = Layers.Enum.UI_2D;
         dim.setParent(popup);
         const dimTransform = dim.addComponent(UITransform);
         dimTransform.setContentSize(width, height);
+        dim.addComponent(BlockInputEvents);
         const dimGfx = dim.addComponent(Graphics);
         dimGfx.fillColor = new Color(0, 0, 0, 160);
         dimGfx.rect(-width * 0.5, -height * 0.5, width, height);
@@ -606,34 +697,49 @@ export class StarWalletHud extends Component {
         bodyLabel.enableWrapText = true;
 
         const okBtn = this.createButton(panel, 'BtnOk', 'OK', 220, 64, 0, -120);
-        okBtn.on(Button.EventType.CLICK, () => this.hideResultPopup(), this);
+        okBtn.on(Button.EventType.CLICK, this.onResultPopupOkClicked, this);
 
         this._resultPopupRoot = popup;
     }
 
+    /** Popup thông báo — ưu tiên panel_notice trong scene/prefab. */
+    public showNoticePopup(title: string, message: string, onClose?: () => void): void {
+        if (NoticePopupPanel.Instance?.node?.isValid) {
+            NoticePopupPanel.Instance.show(title, message, onClose);
+            return;
+        }
+        this._resultPopupOnClose = onClose ?? null;
+        this.showResultPopup(title, message);
+    }
+
+    private onResultPopupOkClicked(): void {
+        const onClose = this._resultPopupOnClose;
+        this._resultPopupOnClose = null;
+        if (this._resultPopupRoot) this._resultPopupRoot.active = false;
+        onClose?.();
+    }
+
     private showResultPopup(title: string, message: string): void {
+        if (TopUpResultPopupPanel.Instance?.node?.isValid) {
+            TopUpResultPopupPanel.Instance.show(title, message);
+            return;
+        }
         this.ensureResultPopup();
         if (!this._resultPopupRoot) return;
 
-        const titleLabel = this._resultPopupRoot.getChildByName('Panel')
-            ?.getChildByName('Title')
-            ?.getComponent(Label);
-        const bodyLabel = this._resultPopupRoot.getChildByName('Panel')
-            ?.getChildByName('Body')
-            ?.getComponent(Label);
+        const panel = this._resultPopupRoot.getChildByName('Panel');
+        const titleLabel = panel?.getChildByName('Title')?.getComponent(Label);
+        const bodyLabel = panel?.getChildByName('Body')?.getComponent(Label);
         if (titleLabel) titleLabel.string = title;
         if (bodyLabel) bodyLabel.string = message;
 
+        this.mountModalOnCanvas(this._resultPopupRoot);
         this._resultPopupRoot.active = true;
-        const popupParent = this._resultPopupRoot.parent;
-        if (popupParent?.isValid) {
-            this._resultPopupRoot.setSiblingIndex(popupParent.children.length - 1);
-        }
-        this.bringToFront();
     }
 
     private hideResultPopup(): void {
         if (this._resultPopupRoot) this._resultPopupRoot.active = false;
+        this._resultPopupOnClose = null;
     }
 
     private buildPurchaseOptions(): PurchasePackOptions {
@@ -657,7 +763,11 @@ export class StarWalletHud extends Component {
             onError: (message) => {
                 this.hidePendingBanner();
                 this.hideWaiting();
-                this.showResultPopup('Top-up failed', message);
+                const title = /not enough tevi stars/i.test(message)
+                    ? 'Insufficient Tevi Stars'
+                    : 'Top-up failed';
+                this._resultPopupOnClose = null;
+                this.showResultPopup(title, message);
             },
         };
     }

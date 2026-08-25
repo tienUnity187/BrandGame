@@ -24,28 +24,37 @@ const SAME_LAYER_GAP_X = 10;
 const SAME_LAYER_GAP_Y = 10;
 const LARGE_TILE_PACK = MAX_TILE_W >= 180 || MAX_TILE_H >= 190;
 
-function boostersFor(idx) {
-  if (idx < 10) {
-    return { HINT: 3, UNDO: 3, SKIP: 0 };
+function difficultyBandParams(idx) {
+  // idx 0 = level 1
+  if (idx < 5) {
+    return { HINT: 3, UNDO: 3, SKIP: 0, wrongTrayMaxSlots: 4, coverThreshold: 0.18 };
+  }
+  if (idx < 12) {
+    return { HINT: 2, UNDO: 2, SKIP: 0, wrongTrayMaxSlots: 3, coverThreshold: 0.12 };
   }
   if (idx < 20) {
-    return { HINT: 3, UNDO: 3, SKIP: 0 };
+    return { HINT: 1, UNDO: 2, SKIP: 0, wrongTrayMaxSlots: 2, coverThreshold: 0.08 };
   }
+  if (idx < 28) {
+    return { HINT: 1, UNDO: 1, SKIP: 0, wrongTrayMaxSlots: 2, coverThreshold: 0.06 };
+  }
+  if (idx < 40) {
+    return { HINT: 0, UNDO: 1, SKIP: 0, wrongTrayMaxSlots: 2, coverThreshold: 0.05 };
+  }
+  return { HINT: 0, UNDO: 0, SKIP: 0, wrongTrayMaxSlots: 2, coverThreshold: 0.04 };
+}
 
-  // Casual pack: keep a gentle safety net without making later levels punishing.
-  return {
-    HINT: Math.min(4, 2 + Math.floor(idx / 20)),
-    UNDO: Math.min(4, 2 + Math.floor(idx / 22)),
-    SKIP: 0,
-  };
+function boostersFor(idx) {
+  const band = difficultyBandParams(idx);
+  return { HINT: band.HINT, UNDO: band.UNDO, SKIP: band.SKIP };
 }
 
 function orderPatternBand(idx) {
-  // Levels 1-10: AAA (3 identical).
-  // Levels 11-20: AAB (2 identical + 1 different).
-  // Levels 21+: ABC (3 different), but overall board/traps stay easy.
-  if (idx < 10) return 'AAA';
-  if (idx < 20) return 'AAB';
+  // Levels 1-5 (idx 0-4): AAA — 3 ô giống nhau.
+  // Levels 6-15: AAB — 2 giống + 1 khác.
+  // Levels 16+: ABC — 3 ô khác nhau.
+  if (idx < 5) return 'AAA';
+  if (idx < 15) return 'AAB';
   return 'ABC';
 }
 
@@ -397,7 +406,7 @@ function compactEarlyPresetLayerOverlap(difficultyIdx, config, tiles) {
 }
 
 function applyFinalCoverThreshold(difficultyIdx, config) {
-  config.coverThreshold = FINAL_COVER_THRESHOLD;
+  config.coverThreshold = difficultyBandParams(difficultyIdx).coverThreshold;
 }
 
 function recenter(config, tiles) {
@@ -685,21 +694,21 @@ function addDecoys(tiles, sequence, idx, board) {
   const byId = new Map(tiles.map(t => [t.id, t]));
   const rank = new Map(sequence.map((t, i) => [t.id, i]));
   const active = new Set(tiles.map(t => t.id));
-  const limit = Math.min(sequence.length - 5, idx < 10 ? 0 : idx < 20 ? 4 : 6 + Math.floor(idx * 0.35));
+  const limit = Math.min(sequence.length - 5, idx < 5 ? 0 : idx < 15 ? 3 : 6 + Math.floor(idx * 0.35));
   const totalCap = Math.min(
     sequence.length - 3,
-    idx < 10 ? 0 :
-      idx < 20 ? Math.max(1, Math.floor(sequence.length * 0.06)) :
+    idx < 5 ? 0 :
+      idx < 15 ? Math.max(1, Math.floor(sequence.length * 0.06)) :
         idx < 35 ? Math.max(3, Math.floor(sequence.length * 0.14)) :
           Math.max(5, Math.floor(sequence.length * 0.22))
   );
-  const perFutureOrderTargetCap = idx < 20 ? 1 : idx < 35 ? 1 : 2;
+  const perFutureOrderTargetCap = idx < 15 ? 1 : idx < 35 ? 1 : 2;
   const futureOrderTargetCounts = new Map();
   let decoyCount = 0;
 
   const desiredChoiceCount = (step) => {
-    if (idx < 10) return 1;
-    if (idx < 20) return 1 + (step >= 8 && step % 5 === 0 ? 1 : 0);
+    if (idx < 5) return 1;
+    if (idx < 15) return 1 + (step >= 8 && step % 5 === 0 ? 1 : 0);
     if (idx < 35) return 1 + (step % 4 === 0 ? 1 : 0);
     return 2 + (step % 3 === 0 ? 1 : 0);
   };
@@ -766,8 +775,8 @@ function addOpeningAmbiguity(tiles, sequence, idx, board) {
   const rank = new Map(sequence.map((t, i) => [t.id, i]));
   const openingTiles = selectable(tiles, board).filter(t => rank.get(t.id) > 2);
   const used = new Set(tiles.filter(t => t.strategyRole).map(t => t.id));
-  const totalCap = idx < 10 ? 0 : idx < 20 ? 1 : idx < 35 ? 3 : 5;
-  const desired = idx < 10 ? 1 : idx < 20 ? 1 : idx < 35 ? 2 : 3;
+  const totalCap = idx < 5 ? 0 : idx < 15 ? 1 : idx < 35 ? 3 : 5;
+  const desired = idx < 5 ? 1 : idx < 15 ? 1 : idx < 35 ? 2 : 3;
   let changes = 0;
 
   for (let step = 0; step < Math.min(10, sequence.length - 3) && changes < totalCap; step++) {
@@ -1224,6 +1233,7 @@ function makeLevel(shapeIdx, difficultyIdx = shapeIdx) {
   ensureCatalogAwareSpacing(board, tiles);
   computeBlockStatus(tiles, board);
 
+  const bandParams = difficultyBandParams(idx);
   const level = {
     levelId,
     displayName: `Level ${pad(levelId)} - ${shapeName}`,
@@ -1235,7 +1245,7 @@ function makeLevel(shapeIdx, difficultyIdx = shapeIdx) {
     orderConfig: {
       orderSize: 3,
       orderMode: 'EXACT_ORDER',
-      wrongTrayMaxSlots: idx < 15 ? 3 : idx < 30 ? 2 : 1,
+      wrongTrayMaxSlots: bandParams.wrongTrayMaxSlots,
       consumeWrongTile: true,
     },
     orders,
@@ -1262,7 +1272,7 @@ function makeLevel(shapeIdx, difficultyIdx = shapeIdx) {
 
   level.difficultyMetrics = {
     designType: 'casual_order_match_aaa_aab_abc_v1_visible_layers',
-    difficultyBand: idx < 10 ? 'tutorial_aaa' : idx < 20 ? 'easy_aab' : idx < 35 ? 'casual_abc' : 'casual_late',
+    difficultyBand: idx < 5 ? 'tutorial_aaa' : idx < 15 ? 'easy_aab' : idx < 35 ? 'casual_abc' : 'casual_late',
     difficultyIndex: idx + 1,
     orderPatternBand: band,
     shapeName,
@@ -1324,7 +1334,7 @@ function progressiveScore(level) {
 }
 
 function difficultyBandForIndex(idx) {
-  return idx < 10 ? 'tutorial_aaa' : idx < 20 ? 'easy_aab' : idx < 35 ? 'casual_abc' : 'casual_late';
+  return idx < 5 ? 'tutorial_aaa' : idx < 15 ? 'easy_aab' : idx < 35 ? 'casual_abc' : 'casual_late';
 }
 
 function renumberLevel(level, idx) {

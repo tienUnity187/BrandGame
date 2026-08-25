@@ -230,6 +230,7 @@ export class Tile extends Component {
         if (this._unlockTween) { this._unlockTween.stop(); this._unlockTween = null; }
         this._isInTrayVisual = true;
         this._isSelected = false;
+        this._isGlowing = false;
         this._lastVisualState = null;
         this._originalScale = new Vec3(1, 1, 1);
         this._originalVisualScale = new Vec3(1, 1, 1);

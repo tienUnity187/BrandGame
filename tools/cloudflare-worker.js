@@ -17,21 +17,22 @@
  *   TOPUP_ORDERS   → KV namespace (lưu order pending/paid)
  *
  * Variables:
- *   ALLOWED_ORIGIN=https://tienunity187.github.io
- *   APP_ID=SRB06792
+ *   ALLOWED_ORIGIN=https://velvetnight.pages.dev
+ *   APP_ID=DQX81404
  *   TEVI_API_BASE=https://developer-api.sbx.tevi.dev
  *   TEVI_VERIFY_URL=https://developer-api.sbx.tevi.dev/api/v1/auth/user
  *   TOKEN_TTL_SECONDS=600
  *
  * Secrets:
  *   VIDEO_SIGNING_SECRET
- *   TEVI_WEBHOOK_SECRET   ← Webhook secret từ Tevi Developer Dashboard
+ *   TEVI_WEBHOOK_SECRET   ← Tevi App Secret key (ký webhook X-Tevi-Signature)
+ *   TEVI_API_KEY          ← Tevi API key (chỉ trên Worker, không đưa vào game)
  */
 
 const WORKER_VERSION = "1.0.16";
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
-/** Game level 5 → vn_reward_01.mp4; thử alias legacy nếu R2 còn tên cũ. */
+/** Game clip 1–13 → vn_reward_01.mp4…13.mp4; alias legacy nếu R2 còn tên cũ. */
 const REWARD_LEGACY_ALIASES = {
   "vn_reward_01.mp4": ["vn_reward_lv05.mp4"],
   "vn_reward_02.mp4": ["vn_reward_lv10.mp4"],
@@ -42,6 +43,10 @@ const REWARD_LEGACY_ALIASES = {
 };
 const REWARD_ALLOWED_FILES = new Set();
 const LEGACY_FILE_TO_CANONICAL = {};
+for (let episode = 1; episode <= 13; episode++) {
+  const padded = episode < 10 ? `0${episode}` : `${episode}`;
+  REWARD_ALLOWED_FILES.add(`vn_reward_${padded}.mp4`);
+}
 for (const [canonical, alts] of Object.entries(REWARD_LEGACY_ALIASES)) {
   REWARD_ALLOWED_FILES.add(canonical);
   LEGACY_FILE_TO_CANONICAL[canonical] = canonical;
@@ -433,7 +438,7 @@ async function createTopUpSignature(request, env) {
   }
 
   const orderId = `ORD_${Date.now()}_${crypto.randomUUID().slice(0, 8)}`;
-  const appId = String(env.APP_ID || body.app_id || "SRB06792").trim();
+  const appId = String(env.APP_ID || body.app_id || "DQX81404").trim();
   const teviBase = String(env.TEVI_API_BASE || "https://developer-api.sbx.tevi.dev").replace(/\/$/, "");
   const teviUrl = `${teviBase}/api/v1/payments/top-up-signature`;
   const teviBody = { amount, user_id: userId, order_id: orderId, app_id: appId };

@@ -423,8 +423,16 @@ export class TrayManager extends Component {
         this.updateGlowEffects();
     }
 
-    /** Bật/tắt glow cho tile sắp match (chỉ khi có đủ matchCount tile cùng groupId liên tiếp) */
+    /** Bật/tắt glow cho tile sắp match (chỉ TRIPLE_MATCH — ORDER_MATCH không dùng glow). */
     private updateGlowEffects(): void {
+        if (OrderManager.getInstance().isActive()) {
+            for (const data of this._trayTiles) {
+                const node = TileManager.getInstance().getTileNode(data.id);
+                const tileComp = node?.getComponent('Tile') as any;
+                if (tileComp?.setGlow) tileComp.setGlow(false);
+            }
+            return;
+        }
         const glowIndices = new Set<number>();
         const matchCount = this._config?.matchCount || 3;
         let i = 0;
@@ -585,7 +593,6 @@ export class TrayManager extends Component {
         this.unscheduleAllCallbacks();
         this._trayTiles = [];
         this._history = snapshot.history.map(h => ({ ...h }));
-        this._settledTileIds = new Set(snapshot.settledTileIds);
         this._flyCount = 0;
         this._pendingOrderClearEffects = 0;
 
@@ -625,9 +632,12 @@ export class TrayManager extends Component {
             }
             const tileComp = node.getComponent('Tile') as any;
             if (tileComp && tileComp.setTrayVisual) tileComp.setTrayVisual();
+            if (tileComp && tileComp.setGlow) tileComp.setGlow(false);
         }
 
-        this.compactTray();
+        // Restore xong là đã nằm slot — coi như settled, tránh order đúng mà tray không clear.
+        this._settledTileIds = new Set(this._trayTiles.map(t => t.id));
+        this.updateGlowEffects();
         this.updateSlotLabel();
     }
 

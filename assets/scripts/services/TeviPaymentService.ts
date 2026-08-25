@@ -11,6 +11,7 @@ import {
     TEVI_TOP_UP_STATUS_URL,
     TEVI_TOP_UP_SDK_REPORT_URL,
     TEVI_TOP_UP_UNCLAIMED_URL,
+    TEVI_USER_BALANCE_URL,
     VERSION,
 } from '../TeviConstants';
 import { EventBus } from '../core/EventBus';
@@ -175,7 +176,7 @@ export class TeviPaymentService {
             const result = await this.runClaimPendingTopUps(userToken);
             if (result.totalStars > 0) {
                 StarWalletHud.logStatus(
-                    `Claim OK +${result.totalStars}★ balance=${result.balance}`,
+                    `Claim OK +${result.totalStars} balance=${result.balance}`,
                 );
             } else if (result.pendingCount > 0) {
                 StarWalletHud.logStatus(
@@ -298,7 +299,7 @@ export class TeviPaymentService {
             if (paidFromWorker.has(orderId)) {
                 stars = Math.max(stars, paidFromWorker.get(orderId) || 0);
                 StarWalletHud.logStatus(
-                    `Claim: Worker paid ${orderId} → +${stars}★ (no re-poll)`,
+                    `Claim: Worker paid ${orderId} → +${stars} (no re-poll)`,
                 );
             } else {
                 try {
@@ -325,8 +326,8 @@ export class TeviPaymentService {
             claimed.push({ orderId, stars });
             totalStars += stars;
             void this.notifyWorkerClaim(userToken, orderId);
-            StarWalletHud.logStatus(`Claim credited +${stars}★ order=${orderId}`);
-            console.log(`[TeviPayment] Claimed pending top-up ${orderId} → +${stars}★ (balance ${balance})`);
+            StarWalletHud.logStatus(`Claim credited +${stars} order=${orderId}`);
+            console.log(`[TeviPayment] Claimed pending top-up ${orderId} → +${stars} (balance ${balance})`);
         }
 
         if (totalStars > 0) {
@@ -440,6 +441,18 @@ export class TeviPaymentService {
                 );
             }
 
+            report(`1/6 Checking Tevi wallet (${TEVI_USER_BALANCE_URL})...`);
+            const teviBalance = await this.fetchTeviWalletBalance(userToken, report);
+            report(`1/6 Tevi wallet balance=${teviBalance} need=${pack.amount}`);
+            if (teviBalance < pack.amount) {
+                throw new Error(
+                    `Not enough Tevi Stars.\n`
+                    + `Your wallet: ${teviBalance} ★\n`
+                    + `This pack needs: ${pack.amount} ★\n\n`
+                    + `Top up your Tevi wallet first, then try again.`,
+                );
+            }
+
             report(`2/6 SEND Worker top-up-signature amount=${pack.amount} stars=${pack.stars} ...`);
             const { depositToken, channelId, orderId } = await this.requestTopUpSignatureViaWorker(
                 userToken,
@@ -476,7 +489,7 @@ export class TeviPaymentService {
                 `topup:${pack.id}:${orderId}`,
             );
             void this.notifyWorkerClaim(userToken, orderId);
-            const message = `6/6 SUCCESS webhook paid → +${pack.stars}★ | Total ★ ${balance} | order=${orderId}`;
+            const message = `6/6 SUCCESS webhook paid → +${pack.stars} | Total ${balance} | order=${orderId}`;
             report(message);
             lifecycle.onSuccess?.(pack.stars, balance);
             return { ok: true, message, balance };
@@ -521,7 +534,7 @@ export class TeviPaymentService {
         await this.delay(350);
 
         const balance = StarWallet.getInstance().addStars(pack.stars, `mock:${pack.id}`);
-        const message = `[Mock] 4/4 SUCCESS → +${pack.stars}★ | Total ★ ${balance} (Tevi not called)`;
+        const message = `[Mock] 4/4 SUCCESS → +${pack.stars} | Total ${balance} (Tevi not called)`;
         report(message);
         lifecycle.onSuccess?.(pack.stars, balance);
         return { ok: true, message, balance };
@@ -538,6 +551,54 @@ export class TeviPaymentService {
 
     private delay(ms: number): Promise<void> {
         return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    /** GET Tevi user balance — trả về số Star trong ví Tevi (không phải ví game). */
+    private async fetchTeviWalletBalance(
+        userToken: string,
+        report?: PaymentStatusCallback,
+    ): Promise<number> {
+        let response: Response;
+        try {
+            response = await fetch(TEVI_USER_BALANCE_URL, {
+                method: 'GET',
+                headers: {
+                    'Authorization': `Bearer ${userToken}`,
+                    'Accept': 'application/json',
+                },
+            });
+        } catch (error) {
+            const message = error instanceof Error ? error.message : `${error}`;
+            throw new Error(`Cannot check Tevi wallet balance: ${message}`);
+        }
+
+        let payload: {
+            success?: boolean;
+            message?: string;
+            error_code?: string | number | null;
+            data?: { amount?: number; currency?: string } | null;
+            amount?: number;
+        } = {};
+        try {
+            payload = await response.json();
+        } catch {
+            throw new Error(`Tevi balance HTTP ${response.status}, body is not JSON.`);
+        }
+
+        if (!response.ok || payload.success === false) {
+            const apiMsg = typeof payload.message === 'string' ? payload.message.trim() : '';
+            const errorCode = payload.error_code != null ? `${payload.error_code}` : '';
+            throw new Error(
+                `Tevi balance HTTP ${response.status}`
+                + (apiMsg ? `: ${apiMsg}` : '')
+                + (errorCode ? ` (code=${errorCode})` : ''),
+            );
+        }
+
+        const rawAmount = payload.data?.amount ?? payload.amount ?? 0;
+        const balance = Math.max(0, Math.floor(Number(rawAmount) || 0));
+        report?.(`Tevi wallet: ${balance} ★`);
+        return balance;
     }
 
     /** Game → Worker → Tevi API; Worker lưu order pending (KV). */
@@ -596,7 +657,10 @@ export class TeviPaymentService {
             const apiMsg = typeof payload.message === 'string' ? payload.message.trim() : '';
             const errorCode = payload.error_code != null ? `${payload.error_code}` : '';
             let hint = '';
-            if (errorCode === 'APP_003' || /app not found/i.test(apiMsg)) {
+            if (/origin not allowed/i.test(apiMsg)) {
+                hint = ' | HINT: Cloudflare Worker → fancy-sun-962d → Variables'
+                    + ' → ALLOWED_ORIGIN=https://velvetnight.pages.dev (no trailing slash) → Deploy';
+            } else if (errorCode === 'APP_003' || /app not found/i.test(apiMsg)) {
                 hint = ` | HINT APP_003: check Worker debug.tevi_url == ${TEVI_TOP_UP_SIGNATURE_URL}`
                     + ` | JWT.app must be ${APP_ID} | Payment+Webhook ON Portal | Bearer-only (no X-API-Key)`;
             }

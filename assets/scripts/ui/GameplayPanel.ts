@@ -39,6 +39,9 @@ export class GameplayPanel extends BasePanel {
     @property(Button)
     public skipButton: Button | null = null;
 
+    @property(Button)
+    public resetButton: Button | null = null;
+
     @property(Label)
     public undoCountLabel: Label | null = null;
 
@@ -61,6 +64,14 @@ export class GameplayPanel extends BasePanel {
             this.timeLabel = this.node.getChildByName('TimeLabel')?.getComponent(Label) || null;
         }
         this.updateUI();
+        if (!this.resetButton) {
+            this.resetButton = this.node.getChildByName('Reset')?.getComponent(Button) || null;
+        }
+        if (this.resetButton?.node?.isValid) {
+            this.resetButton.node.active = true;
+        }
+        const strayStar = this.starLabel?.node || this.node.getChildByName('StarLabel');
+        if (strayStar?.isValid) strayStar.active = false;
         if (this.undoButton && this.undoButton.node.isValid) {
             this._undoButtonOriginalPos = this.undoButton.node.position.clone();
             this._undoButtonOriginalScale = this.undoButton.node.scale.clone();

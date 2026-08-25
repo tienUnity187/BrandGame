@@ -4,8 +4,8 @@
   "defaultSkin": "uma",
   "gameMode": "ORDER_MATCH",
   "startingBoosters": {
-    "HINT": 3,
-    "UNDO": 3,
+    "HINT": 2,
+    "UNDO": 2,
     "SKIP": 0
   },
   "board": {
@@ -25,7 +25,7 @@
     "jitterMode": "layer_visible_mixed_shape",
     "blockMode": "overlap",
     "minBlockOverlapPixels": 1,
-    "coverThreshold": 0.08,
+    "coverThreshold": 0.12,
     "blockOverlapWidthRatio": 0.45,
     "blockOverlapHeightRatio": 0.07,
     "blockOverlapAreaRatio": 0.02,
@@ -79,7 +79,7 @@
       "items": [
         "7",
         "7",
-        "7"
+        "8"
       ]
     },
     {
@@ -87,7 +87,7 @@
       "items": [
         "1",
         "1",
-        "1"
+        "3"
       ]
     },
     {
@@ -95,7 +95,7 @@
       "items": [
         "6",
         "6",
-        "6"
+        "9"
       ]
     },
     {
@@ -103,7 +103,7 @@
       "items": [
         "5",
         "5",
-        "5"
+        "9"
       ]
     },
     {
@@ -111,7 +111,7 @@
       "items": [
         "9",
         "9",
-        "9"
+        "4"
       ]
     },
     {
@@ -119,7 +119,7 @@
       "items": [
         "7",
         "7",
-        "7"
+        "8"
       ]
     }
   ],
@@ -127,32 +127,32 @@
     [
       "7",
       "7",
-      "7"
+      "8"
     ],
     [
       "1",
       "1",
-      "1"
+      "3"
     ],
     [
       "6",
       "6",
-      "6"
-    ],
-    [
-      "5",
-      "5",
-      "5"
-    ],
-    [
-      "9",
-      "9",
       "9"
     ],
     [
+      "5",
+      "5",
+      "9"
+    ],
+    [
+      "9",
+      "9",
+      "4"
+    ],
+    [
       "7",
       "7",
-      "7"
+      "8"
     ]
   ],
   "solutionMoveTileIds": [
@@ -195,7 +195,7 @@
     },
     {
       "id": "L9_T001",
-      "groupId": "6",
+      "groupId": "9",
       "tileType": 0,
       "gridX": -0.1,
       "gridY": 1.12,
@@ -207,8 +207,8 @@
       "clusterCount": 1,
       "sameLayerOverlapForbidden": true,
       "designRole": "bottom",
-      "tileWidth": 151,
-      "tileHeight": 200
+      "tileWidth": 210,
+      "tileHeight": 204
     },
     {
       "id": "L9_T002",
@@ -263,7 +263,7 @@
     },
     {
       "id": "L9_T005",
-      "groupId": "1",
+      "groupId": "3",
       "tileType": 0,
       "gridX": 1,
       "gridY": 1,
@@ -275,7 +275,7 @@
       "clusterCount": 1,
       "sameLayerOverlapForbidden": true,
       "designRole": "middle",
-      "tileWidth": 197,
+      "tileWidth": 198,
       "tileHeight": 201
     },
     {
@@ -348,7 +348,7 @@
     },
     {
       "id": "L9_T010",
-      "groupId": "7",
+      "groupId": "8",
       "tileType": 0,
       "gridX": 1.1,
       "gridY": 1.88,
@@ -360,12 +360,12 @@
       "clusterCount": 1,
       "sameLayerOverlapForbidden": true,
       "designRole": "top",
-      "tileWidth": 204,
+      "tileWidth": 202,
       "tileHeight": 204
     },
     {
       "id": "L9_T011",
-      "groupId": "5",
+      "groupId": "9",
       "tileType": 0,
       "gridX": 1.9,
       "gridY": 2.12,
@@ -377,8 +377,8 @@
       "clusterCount": 1,
       "sameLayerOverlapForbidden": true,
       "designRole": "bottom",
-      "tileWidth": 150,
-      "tileHeight": 199
+      "tileWidth": 210,
+      "tileHeight": 204
     },
     {
       "id": "L9_T012",
@@ -416,7 +416,7 @@
     },
     {
       "id": "L9_T014",
-      "groupId": "7",
+      "groupId": "8",
       "tileType": 0,
       "gridX": -0.1,
       "gridY": 3.12,
@@ -428,7 +428,10 @@
       "clusterCount": 1,
       "sameLayerOverlapForbidden": true,
       "designRole": "bottom",
-      "tileWidth": 204,
+      "strategyRole": "opening_same_item_decoy",
+      "decoyForStep": 3,
+      "decoyAgainstKeyTile": "L9_T010",
+      "tileWidth": 202,
       "tileHeight": 204
     },
     {
@@ -450,20 +453,20 @@
     },
     {
       "id": "L9_T016",
-      "groupId": "9",
+      "groupId": "4",
       "tileType": 0,
       "gridX": 1.9,
       "gridY": 3.12,
       "layer": 2,
       "active": true,
-      "selectable": false,
-      "isBlocked": true,
+      "selectable": true,
+      "isBlocked": false,
       "clusteredLayout": false,
       "clusterCount": 1,
       "sameLayerOverlapForbidden": true,
       "designRole": "bottom",
-      "tileWidth": 210,
-      "tileHeight": 204
+      "tileWidth": 197,
+      "tileHeight": 201
     },
     {
       "id": "L9_T017",
@@ -490,9 +493,9 @@
   ],
   "difficultyMetrics": {
     "designType": "casual_order_match_aaa_aab_abc_v1_visible_layers",
-    "difficultyBand": "tutorial_aaa",
+    "difficultyBand": "easy_aab",
     "difficultyIndex": 9,
-    "orderPatternBand": "AAA",
+    "orderPatternBand": "AAB",
     "shapeName": "petal_rise",
     "totalTiles": 18,
     "orderCount": 6,
@@ -500,39 +503,39 @@
     "startingSelectableTiles": 18,
     "sameItemPathDecoyCount": 0,
     "criticalPathDecoyCount": 0,
-    "openingSameItemDecoyCount": 0,
-    "totalStrategicDecoyCount": 0,
+    "openingSameItemDecoyCount": 1,
+    "totalStrategicDecoyCount": 1,
     "averageSelectableTilesDuringSolution": 7.39,
-    "averageSameItemChoicesDuringSolution": 2.17,
-    "maxSameItemChoicesDuringSolution": 5,
+    "averageSameItemChoicesDuringSolution": 1.78,
+    "maxSameItemChoicesDuringSolution": 4,
     "firstTenSameItemChoices": [
-      5,
-      5,
-      4,
+      3,
+      3,
+      2,
       2,
       1,
       1,
       1,
       1,
-      1,
-      3
+      4,
+      2
     ],
-    "forcedSteps": 8,
+    "forcedSteps": 9,
     "realTrapSteps": 3,
-    "harmlessAmbiguousSteps": 7,
-    "averageCorrectChoices": 2.17,
-    "averageWinningChoices": 1.67,
+    "harmlessAmbiguousSteps": 6,
+    "averageCorrectChoices": 1.78,
+    "averageWinningChoices": 1.5,
     "firstTenBranching": [
       {
-        "choices": 5,
-        "winning": 2
+        "choices": 3,
+        "winning": 1
       },
       {
-        "choices": 5,
-        "winning": 2
+        "choices": 3,
+        "winning": 1
       },
       {
-        "choices": 4,
+        "choices": 2,
         "winning": 1
       },
       {
@@ -556,12 +559,12 @@
         "winning": 1
       },
       {
-        "choices": 1,
-        "winning": 1
+        "choices": 4,
+        "winning": 4
       },
       {
-        "choices": 3,
-        "winning": 3
+        "choices": 2,
+        "winning": 2
       }
     ],
     "staggeredOrders": 3,
@@ -635,7 +638,7 @@
       "y": 238
     },
     "screenBounds": {
-      "minX": -459.46,
+      "minX": -462.46,
       "maxX": 455.54,
       "minY": -426.32,
       "maxY": 489.18
@@ -649,6 +652,6 @@
     "screenFitValidated": true,
     "solutionValidated": true,
     "strategicGoal": "Progressive ORDER_MATCH puzzle with unique balanced silhouettes, deeper core stacks, exact solution path, same-item decoys, and lower layers visibly offset by about 1/3-1/2 tile area.",
-    "progressiveDifficultyScore": 105.22
+    "progressiveDifficultyScore": 103.58
   }
 }
