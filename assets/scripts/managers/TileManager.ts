@@ -9,6 +9,7 @@ import { SkinManager } from './SkinManager';
 import { OrderManager } from './OrderManager';
 import { BoardPositionHelper } from '../core/BoardPositionHelper';
 import { AudioManager } from './AudioManager';
+import { TutorialGate } from '../core/TutorialGate';
 
 const { ccclass, property } = _decorator;
 
@@ -419,6 +420,7 @@ export class TileManager extends Component {
 
     public tryClickTile(tileId: string, ignoreInputLock: boolean = false): boolean {
         if (this._isInputLocked && !ignoreInputLock) return false;
+        if (!TutorialGate.canClickTile(tileId)) return false;
         if (!this._clickableTiles.has(tileId)) return false;
 
         const data = this._tileDataMap.get(tileId);

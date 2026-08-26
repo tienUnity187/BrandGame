@@ -1,5 +1,6 @@
 import { _decorator, Component, Node, tween, Vec3 } from 'cc';
 import { UIManager } from '../managers/UIManager';
+import { AudioManager } from '../managers/AudioManager';
 
 const { ccclass, property } = _decorator;
 
@@ -31,6 +32,7 @@ export class BasePanel extends Component {
         this.node.active = true;
         this._isVisible = true;
         this.onShow(data);
+        AudioManager.getInstance()?.bindButtonSounds(this.node);
     }
 
     /** Ẩn panel */

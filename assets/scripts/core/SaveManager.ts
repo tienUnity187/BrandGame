@@ -10,6 +10,7 @@ export class SaveManager {
     private static readonly SAVE_PREFIX = `MiniGame1_${GAME_NAME}`;
     private static readonly KEY = `${SaveManager.SAVE_PREFIX}_currentLevel`;
     private static readonly SKIP_COUNT_KEY = `${SaveManager.SAVE_PREFIX}_skipCount`;
+    private static readonly TUTORIAL_KEY = `${SaveManager.SAVE_PREFIX}_tutorialCompleted`;
     private static readonly DEFAULT_SKIP_COUNT = 1;
     private static readonly MAX_SKIP_COUNT = 1;
     private static readonly MAX_LEVEL_ID = 50;
@@ -53,6 +54,7 @@ export class SaveManager {
         try {
             sys.localStorage.removeItem(SaveManager.KEY);
             sys.localStorage.removeItem(SaveManager.SKIP_COUNT_KEY);
+            sys.localStorage.removeItem(SaveManager.TUTORIAL_KEY);
         } catch (err) {
         }
     }
@@ -102,6 +104,21 @@ export class SaveManager {
 
     private static clampSkipCount(count: number): number {
         return Math.min(SaveManager.MAX_SKIP_COUNT, Math.max(0, Math.floor(count)));
+    }
+
+    public hasCompletedTutorial(): boolean {
+        try {
+            return sys.localStorage.getItem(SaveManager.TUTORIAL_KEY) === '1';
+        } catch {
+            return false;
+        }
+    }
+
+    public markTutorialCompleted(): void {
+        try {
+            sys.localStorage.setItem(SaveManager.TUTORIAL_KEY, '1');
+        } catch {
+        }
     }
 
     public static reset(): void {

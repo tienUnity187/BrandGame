@@ -26,6 +26,8 @@ import { TopUpPendingStore } from '../services/TopUpPendingStore';
 import { TeviLoginManager } from '../TeviLoginManager';
 import { NoticePopupPanel } from './NoticePopupPanel';
 import { TopUpResultPopupPanel } from './TopUpResultPopupPanel';
+import { TutorialGate } from '../core/TutorialGate';
+import { AudioManager } from '../managers/AudioManager';
 
 const { ccclass, property } = _decorator;
 
@@ -65,6 +67,8 @@ export class StarWalletHud extends Component {
     private _resultPopupOnClose: (() => void) | null = null;
     private _openShopButton: Button | null = null;
     private _built = false;
+    private _topUpResultLoading = false;
+    private _topUpResultReadyQueue: Array<() => void> = [];
     /** Giữ vài dòng status gần nhất — tránh mất JWT.app vì chạy quá nhanh. */
     private _statusLines: string[] = [];
     private static readonly STATUS_MAX_LINES = 8;
@@ -142,7 +146,16 @@ export class StarWalletHud extends Component {
                 + `+${stars} added to your wallet!\n`
                 + `Total: ${balance}`
             : `+${stars} added!\nTotal: ${balance}`;
-        this.showResultPopup(title, message);
+        this.ensureTopUpResultPopup(() => {
+            const panel = TopUpResultPopupPanel.Instance;
+            if (!panel?.node?.isValid) {
+                this.showResultPopup(title, message);
+                return;
+            }
+            panel.show(title, message, undefined, {
+                topUpSuccess: { stars, balance, fromPreviousPurchase },
+            });
+        });
         StarWalletHud.logStatus(`Popup: ${title} +${stars}`);
     }
 
@@ -251,6 +264,7 @@ export class StarWalletHud extends Component {
         }
 
         this.bindEditorShop();
+        AudioManager.getInstance()?.bindButtonSounds(this.node);
     }
 
     private bindEditorShop(): void {
@@ -463,7 +477,29 @@ export class StarWalletHud extends Component {
         return node;
     }
 
+    /** Coin / star bar used by the first-time tutorial pointer. */
+    public getCoinBarNode(): Node | null {
+        return this.topBar
+            || this._openShopButton?.node
+            || this.node.getChildByName('StarTopBar')
+            || null;
+    }
+
+    public isShopOpen(): boolean {
+        return !!this._shopRoot?.isValid && this._shopRoot.active;
+    }
+
+    /** Open the top-up shop. Tutorial hotspot uses force=true. */
+    public openShopForced(): void {
+        this.openShopInternal(true);
+    }
+
     private openShop(): void {
+        this.openShopInternal(false);
+    }
+
+    private openShopInternal(force: boolean): void {
+        if (!force && !TutorialGate.canOpenShop()) return;
         if (!this._shopRoot?.isValid) {
             console.warn('[StarWalletHud] StarShopPanel chưa được gán trong editor.');
             return;
@@ -478,10 +514,15 @@ export class StarWalletHud extends Component {
         if (parent) {
             this.node.setSiblingIndex(parent.children.length - 1);
         }
+        EventBus.getInstance().emit(GameEvent.STAR_SHOP_OPENED);
     }
 
     private closeShop(): void {
+        const wasOpen = !!this._shopRoot?.active;
         if (this._shopRoot) this._shopRoot.active = false;
+        if (wasOpen) {
+            EventBus.getInstance().emit(GameEvent.STAR_SHOP_CLOSED);
+        }
     }
 
     private bringToFront(): void {
@@ -600,34 +641,47 @@ export class StarWalletHud extends Component {
     }
 
     /** Popup top-up (thiếu sao / failed / success) — prefab `panel_topup_result`. */
-    private ensureTopUpResultPopup(): void {
+    private ensureTopUpResultPopup(onReady?: () => void): void {
         const existing = TopUpResultPopupPanel.Instance
             || director.getScene()?.getComponentInChildren(TopUpResultPopupPanel)
             || null;
         if (existing?.node?.isValid) {
             TopUpResultPopupPanel.Instance = existing;
+            onReady?.();
             return;
         }
+        if (onReady) this._topUpResultReadyQueue.push(onReady);
+        if (this._topUpResultLoading) return;
+        this._topUpResultLoading = true;
 
         const canvas = this.getCanvasNode();
         const parent = canvas?.isValid ? canvas : this.node;
         resources.load('prefabs/ui/panel_topup_result', Prefab, (err, prefab) => {
+            this._topUpResultLoading = false;
             if (err || !prefab) {
                 console.warn(
                     '[StarWalletHud] Không load panel_topup_result — dùng popup runtime fallback.',
                     err,
                 );
+                this.flushTopUpResultReady();
                 return;
             }
-            if (TopUpResultPopupPanel.Instance?.node?.isValid) return;
-            const node = instantiate(prefab);
-            node.name = 'TopUpResultPopupPanel';
-            node.setParent(parent);
-            node.setPosition(0, 0, 0);
-            node.layer = parent.layer;
-            node.active = false;
-            console.log('[StarWalletHud] Spawn TopUpResultPopupPanel từ prefab.');
+            if (!TopUpResultPopupPanel.Instance?.node?.isValid) {
+                const node = instantiate(prefab);
+                node.name = 'TopUpResultPopupPanel';
+                node.setParent(parent);
+                node.setPosition(0, 0, 0);
+                node.layer = parent.layer;
+                node.active = false;
+                console.log('[StarWalletHud] Spawn TopUpResultPopupPanel từ prefab.');
+            }
+            this.flushTopUpResultReady();
         });
+    }
+
+    private flushTopUpResultReady(): void {
+        const queued = this._topUpResultReadyQueue.splice(0);
+        for (const fn of queued) fn();
     }
 
     private ensureResultPopup(): void {
@@ -700,6 +754,38 @@ export class StarWalletHud extends Component {
         okBtn.on(Button.EventType.CLICK, this.onResultPopupOkClicked, this);
 
         this._resultPopupRoot = popup;
+        AudioManager.getInstance()?.bindButtonSounds(popup);
+    }
+
+    /** Popup khi booster không đủ ★ — dùng panel_topup_result + clone thanh nạp. */
+    public notifyInsufficientStars(cost: number, actionName: string): void {
+        const balance = StarWallet.getInstance().getBalance();
+        const title = 'Not enough coins';
+        const message =
+            `You need ${cost} coins to use ${actionName}.\n`
+            + `Your balance: ${balance} coins`;
+        this.ensureTopUpResultPopup(() => this.presentInsufficientBoosterPopup(title, message, {
+            cost,
+            actionName,
+            balance,
+        }));
+    }
+
+    private presentInsufficientBoosterPopup(
+        title: string,
+        message: string,
+        shortage: { cost: number; actionName: string; balance: number },
+    ): void {
+        const panel = TopUpResultPopupPanel.Instance;
+        if (!panel?.node?.isValid) {
+            this.showResultPopup(title, message);
+            return;
+        }
+        panel.show(title, message, undefined, {
+            topUpBarSource: this.getCoinBarNode(),
+            onTopUpClicked: () => this.openShopForced(),
+            boosterShortage: shortage,
+        });
     }
 
     /** Popup thông báo — ưu tiên panel_notice trong scene/prefab. */
@@ -709,7 +795,7 @@ export class StarWalletHud extends Component {
             return;
         }
         this._resultPopupOnClose = onClose ?? null;
-        this.showResultPopup(title, message);
+        this.showResultPopup(title, message, onClose);
     }
 
     private onResultPopupOkClicked(): void {
@@ -719,9 +805,9 @@ export class StarWalletHud extends Component {
         onClose?.();
     }
 
-    private showResultPopup(title: string, message: string): void {
+    private showResultPopup(title: string, message: string, onClose?: () => void): void {
         if (TopUpResultPopupPanel.Instance?.node?.isValid) {
-            TopUpResultPopupPanel.Instance.show(title, message);
+            TopUpResultPopupPanel.Instance.show(title, message, onClose);
             return;
         }
         this.ensureResultPopup();
@@ -740,6 +826,7 @@ export class StarWalletHud extends Component {
     private hideResultPopup(): void {
         if (this._resultPopupRoot) this._resultPopupRoot.active = false;
         this._resultPopupOnClose = null;
+        TopUpResultPopupPanel.Instance?.hide();
     }
 
     private buildPurchaseOptions(): PurchasePackOptions {

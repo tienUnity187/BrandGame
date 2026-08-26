@@ -5,7 +5,7 @@ import { BoosterManager } from '../managers/BoosterManager';
 import { TileManager } from '../managers/TileManager';
 import { OrderManager } from '../managers/OrderManager';
 import { TrayManager } from '../managers/TrayManager';
-import { AudioManager } from '../managers/AudioManager';
+import { TutorialGate } from '../core/TutorialGate';
 
 const { ccclass, property } = _decorator;
 
@@ -23,14 +23,14 @@ export class ResetButton extends Component {
     }
 
     private onResetClicked(): void {
-        AudioManager.getInstance()?.playSfx('button-click');
+        if (!TutorialGate.canReset()) return;
         OrderManager.getInstance().abortPendingCompletion();
         TrayManager.getInstance()?.cancelPendingOrderClearEffects();
         BoosterManager.getInstance()?.clearUndoStack();
         TileManager.getInstance()?.setInputLocked(false);
         const levelId = LevelManager.getInstance().getCurrentLevelId();
         if (levelId > 0) {
-            void GameManager.Instance?.startLevel(levelId);
+            void GameManager.Instance?.startLevel(levelId, { skipTutorial: true });
         }
     }
 

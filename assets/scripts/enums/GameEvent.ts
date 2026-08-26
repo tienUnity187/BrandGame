@@ -36,4 +36,8 @@ export enum GameEvent {
     PENDING_TOPUP_CLAIMED = 'pending_topup_claimed',
     /** Yêu cầu quét order paid (sau login Tevi). */
     REQUEST_CLAIM_PENDING_TOPUPS = 'request_claim_pending_topups',
+    /** Star shop panel opened. */
+    STAR_SHOP_OPENED = 'star_shop_opened',
+    /** Star shop panel closed. */
+    STAR_SHOP_CLOSED = 'star_shop_closed',
 }

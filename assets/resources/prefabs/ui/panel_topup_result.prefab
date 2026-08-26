@@ -410,10 +410,10 @@
     "_string": "Insufficient Tevi Stars",
     "_horizontalAlign": 1,
     "_verticalAlign": 1,
-    "_actualFontSize": 34,
-    "_fontSize": 34,
+    "_actualFontSize": 38,
+    "_fontSize": 38,
     "_fontFamily": "Arial",
-    "_lineHeight": 40,
+    "_lineHeight": 44,
     "_overflow": 1,
     "_enableWrapText": false,
     "_font": {
@@ -769,10 +769,10 @@
     "_string": "Not enough Tevi Stars.\n\nYour wallet: 0 ★\nThis pack needs: 100 ★\n\nTop up your Tevi wallet first, then try again.",
     "_horizontalAlign": 1,
     "_verticalAlign": 1,
-    "_actualFontSize": 26,
-    "_fontSize": 26,
+    "_actualFontSize": 30,
+    "_fontSize": 30,
     "_fontFamily": "Arial",
-    "_lineHeight": 34,
+    "_lineHeight": 38,
     "_overflow": 1,
     "_enableWrapText": true,
     "_font": {
@@ -1023,6 +1023,7 @@
     "okButton": {
       "__id__": 22
     },
+    "autoFitBody": true,
     "_id": ""
   },
   {

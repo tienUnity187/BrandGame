@@ -2,6 +2,7 @@ import { _decorator, Component, Node, EventTouch, Vec3, tween, Sprite, Color, Tw
 import { ITileData } from '../interfaces/ITileData';
 import { TileManager } from '../managers/TileManager';
 import { AudioManager } from '../managers/AudioManager';
+import { TutorialGate } from '../core/TutorialGate';
 
 const { ccclass, property } = _decorator;
 const BOARD_BLOCKED_COLOR = new Color(129, 129, 129, 255);
@@ -301,6 +302,7 @@ export class Tile extends Component {
         if (!this.node.active || this.node.scale.x < 0.01) return;
         if (!this._data || this._isAnimating) return;
         if (!this._data.selectable) return;
+        if (!TutorialGate.canClickTile(this._data.id)) return;
 
         AudioManager.getInstance()?.playSfx('tile_click');
         TileManager.getInstance().onTileClicked(this._data.id);

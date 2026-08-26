@@ -19,6 +19,7 @@ import { REWARD_VIDEO_UNLOCK_LEVELS } from '../TeviConstants';
 import { TeviLoginManager } from '../TeviLoginManager';
 import { BasePanel } from './BasePanel';
 import { RewardVideoPlayer } from './RewardVideoPlayer';
+import { AudioManager } from '../managers/AudioManager';
 
 const { ccclass, property } = _decorator;
 
@@ -90,7 +91,9 @@ export class RewardVideoGalleryPanel extends BasePanel {
     }
 
     public refresh(): void {
-        if (this._isVisible) this.rebuildList();
+        if (!this._isVisible) return;
+        this.rebuildList();
+        AudioManager.getInstance()?.bindButtonSounds(this.node);
     }
 
     private onHistoryChanged(): void {

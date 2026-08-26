@@ -544,6 +544,14 @@ export class OrderTrayManager extends Component {
     }
 
     /** Animation khi order hoàn thành: glow các slot của order vừa xong */
+    /** Current order panel (or tray container) for tutorial pointing. */
+    public getFocusNode(): Node | null {
+        const panel = this._orderPanelMap.get(this._lastOrderIndex);
+        if (panel?.isValid) return panel;
+        if (this.trayContainer?.isValid) return this.trayContainer;
+        return this.node?.isValid ? this.node : null;
+    }
+
     public getCurrentOrderEffectWorldPosition(): Vec3 | null {
         const currentSlots = this._slots.filter(slot =>
             slot.orderIndex === this._lastOrderIndex &&

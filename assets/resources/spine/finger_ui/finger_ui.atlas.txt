@@ -1,0 +1,13 @@
+
+finger_ui.png
+size: 183,209
+format: RGBA8888
+filter: Linear,Linear
+repeat: none
+tutorial_finger_01
+  rotate: false
+  xy: 2, 2
+  size: 179, 205
+  orig: 200, 206
+  offset: 20, 0
+  index: -1

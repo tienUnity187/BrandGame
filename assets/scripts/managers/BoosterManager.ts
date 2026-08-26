@@ -14,6 +14,7 @@ import { BoardPositionHelper } from '../core/BoardPositionHelper';
 import { SaveManager } from '../core/SaveManager';
 import { HINT_STAR_COST, SKIP_STAR_COST, UNDO_STAR_COST } from '../TeviConstants';
 import { StarWallet } from '../services/StarWallet';
+import { TutorialGate } from '../core/TutorialGate';
 
 const { ccclass } = _decorator;
 
@@ -129,6 +130,7 @@ export class BoosterManager extends Component {
     }
 
     public UseHint(): boolean {
+        if (!TutorialGate.canUseBooster()) return false;
         if (!LevelManager.getInstance().isLevelActive()) return false;
         if (!StarWallet.getInstance().canAfford(HINT_STAR_COST)) return false;
         // Nếu không có tile nào để hint và board đã settle, không trừ Star, rung nhẹ
@@ -711,6 +713,7 @@ export class BoosterManager extends Component {
     }
 
     public UseUndo(): boolean {
+        if (!TutorialGate.canUseBooster()) return false;
         if (!LevelManager.getInstance().isLevelActive() || this.isTileFlyingForUndo()) return false;
         if (!StarWallet.getInstance().canAfford(UNDO_STAR_COST)) return false;
         if (!this.hasUndoSnapshot()) return false;
@@ -765,6 +768,7 @@ export class BoosterManager extends Component {
     }
 
     public UseSkipLevel(): boolean {
+        if (!TutorialGate.canUseBooster()) return false;
         if (!LevelManager.getInstance().isLevelActive()) return false;
         if (!StarWallet.getInstance().trySpend(SKIP_STAR_COST, 'skip')) return false;
 
@@ -1028,19 +1032,22 @@ export class BoosterManager extends Component {
     }
 
     public canUseHint(): boolean {
-        return LevelManager.getInstance().isLevelActive()
+        return TutorialGate.canUseBooster()
+            && LevelManager.getInstance().isLevelActive()
             && StarWallet.getInstance().canAfford(HINT_STAR_COST);
     }
 
     public canUseUndo(): boolean {
-        return LevelManager.getInstance().isLevelActive() &&
+        return TutorialGate.canUseBooster()
+            && LevelManager.getInstance().isLevelActive() &&
             !this.isTileFlyingForUndo() &&
             StarWallet.getInstance().canAfford(UNDO_STAR_COST) &&
             this.hasUndoSnapshot();
     }
 
     public canUseSkip(): boolean {
-        return LevelManager.getInstance().isLevelActive() &&
+        return TutorialGate.canUseBooster()
+            && LevelManager.getInstance().isLevelActive() &&
             StarWallet.getInstance().canAfford(SKIP_STAR_COST);
     }
 

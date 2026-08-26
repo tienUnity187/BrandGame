@@ -8,6 +8,8 @@ import { BoosterManager } from '../managers/BoosterManager';
 import { AudioManager } from '../managers/AudioManager';
 import { HINT_STAR_COST, SKIP_STAR_COST, UNDO_STAR_COST } from '../TeviConstants';
 import { StarWallet } from '../services/StarWallet';
+import { TutorialGate } from '../core/TutorialGate';
+import { StarWalletHud } from './StarWalletHud';
 
 const { ccclass, property } = _decorator;
 
@@ -199,6 +201,7 @@ export class GameplayPanel extends BasePanel {
         this.unbindBoosterButtons();
         AudioManager.getInstance()?.unbindButtonSound(this.undoButton?.node || null);
         AudioManager.getInstance()?.unbindButtonSound(this.hintButton?.node || null);
+        AudioManager.getInstance()?.unbindButtonSound(this.skipButton?.node || null);
         this.undoButton?.node.on(Button.EventType.CLICK, this.onUndoClicked, this);
         this.hintButton?.node.on(Button.EventType.CLICK, this.onHintClicked, this);
         this.skipButton?.node.on(Button.EventType.CLICK, this.onSkipClicked, this);
@@ -210,9 +213,23 @@ export class GameplayPanel extends BasePanel {
         this.skipButton?.node.off(Button.EventType.CLICK, this.onSkipClicked, this);
     }
 
+    /** Booster row used by the first-time tutorial pointer. */
+    public getBoosterBarNode(): Node | null {
+        return this.hintButton?.node
+            || this.node.getChildByName('Item')
+            || this.undoButton?.node
+            || this.skipButton?.node
+            || null;
+    }
+
     private onUndoClicked(): void {
+        if (!TutorialGate.canUseBooster()) return;
         this.releaseUndoButtonVisual();
         this.scheduleOnce(() => {
+            if (this.notifyIfCannotAfford(UNDO_STAR_COST, 'Undo')) {
+                AudioManager.getInstance()?.playSfx('button-click');
+                return;
+            }
             const used = BoosterManager.getInstance()?.UseUndo() || false;
             AudioManager.getInstance()?.playSfx(used ? 'tile_click' : 'button-click');
             this.updateBoosterUI();
@@ -220,26 +237,43 @@ export class GameplayPanel extends BasePanel {
     }
 
     private onHintClicked(): void {
+        if (!TutorialGate.canUseBooster()) return;
+        if (this.notifyIfCannotAfford(HINT_STAR_COST, 'Hint')) {
+            AudioManager.getInstance()?.playSfx('button-click');
+            return;
+        }
         const used = BoosterManager.getInstance()?.UseHint() || false;
         AudioManager.getInstance()?.playSfx(used ? 'tile_click' : 'button-click');
         this.updateBoosterUI();
     }
 
     private onSkipClicked(): void {
+        if (!TutorialGate.canUseBooster()) return;
+        if (this.notifyIfCannotAfford(SKIP_STAR_COST, 'Skip')) {
+            AudioManager.getInstance()?.playSfx('button-click');
+            return;
+        }
         BoosterManager.getInstance()?.UseSkipLevel();
+        AudioManager.getInstance()?.playSfx('button-click');
         this.updateBoosterUI();
     }
 
+    private notifyIfCannotAfford(cost: number, actionName: string): boolean {
+        if (StarWallet.getInstance().canAfford(cost)) return false;
+        StarWalletHud.Instance?.notifyInsufficientStars(cost, actionName);
+        return true;
+    }
+
     private updateBoosterUI(): void {
-        const booster = BoosterManager.getInstance();
-        if (!booster) return;
+        if (!BoosterManager.getInstance()) return;
         if (this.undoCountLabel) this.undoCountLabel.string = `${UNDO_STAR_COST}`;
         if (this.hintCountLabel) this.hintCountLabel.string = `${HINT_STAR_COST}`;
         if (this.skipCountLabel) this.skipCountLabel.string = `${SKIP_STAR_COST}`;
 
-        if (this.undoButton) this.undoButton.interactable = booster.canUseUndo();
-        if (this.hintButton) this.hintButton.interactable = booster.canUseHint();
-        if (this.skipButton) this.skipButton.interactable = booster.canUseSkip();
+        const levelActive = LevelManager.getInstance().isLevelActive();
+        if (this.undoButton) this.undoButton.interactable = levelActive;
+        if (this.hintButton) this.hintButton.interactable = levelActive;
+        if (this.skipButton) this.skipButton.interactable = levelActive;
         this.refreshWalletStarLabel();
     }
 

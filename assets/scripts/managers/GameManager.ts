@@ -13,6 +13,7 @@ import { SaveManager } from '../core/SaveManager';
 import { OrderTrayManager } from './OrderTrayManager';
 import { WrongTrayManager } from './WrongTrayManager';
 import { BoosterManager } from './BoosterManager';
+import { TutorialManager } from './TutorialManager';
 import { GAME_NAME } from '../core/GameBrandConfig';
 import { TeviLoginManager } from '../TeviLoginManager';
 import {
@@ -235,6 +236,7 @@ export class GameManager extends Component {
     }
 
     private async onLevelCompleted(levelId: number, score: number, stars: number): Promise<void> {
+        TutorialManager.getInstance().abort();
         try {
             this.stopTimer();
             // Thắng rồi: lưu level tiếp theo để mở lại game tiếp tục đúng tiến trình.
@@ -326,6 +328,7 @@ export class GameManager extends Component {
     }
 
     private async onLevelFailed(levelId: number): Promise<void> {
+        TutorialManager.getInstance().abort();
         try {
             this.stopTimer();
             const panel = await UIManager.getInstance().openPanel('LevelFailedPanel', { levelId });
@@ -360,6 +363,10 @@ export class GameManager extends Component {
         if (audioMgr) {
             await audioMgr.initialize();
             audioMgr.bindButtonSounds(this.node);
+            audioMgr.bindButtonSounds(this.homeScreen);
+            audioMgr.bindButtonSounds(this.gameScreen);
+            const canvas = director.getScene()?.getChildByName('Canvas') ?? null;
+            audioMgr.bindButtonSounds(canvas);
         }
 
         await LevelManager.getInstance().initialize();
@@ -454,7 +461,7 @@ export class GameManager extends Component {
     }
 
     /** Bắt đầu level mới */
-    public async startLevel(levelId: number, options?: { parallelTransition?: boolean }): Promise<void> {
+    public async startLevel(levelId: number, options?: { parallelTransition?: boolean; skipTutorial?: boolean }): Promise<void> {
         const startToken = ++this._startLevelToken;
         await this.waitForInitialization();
         await this.ensureHomeLevelPrepared(levelId);
@@ -486,9 +493,11 @@ export class GameManager extends Component {
             if (!gameplayPanel) {
                             } else {
                             }
+            AudioManager.getInstance()?.bindButtonSounds(this.gameScreen);
             this.stopTimer();
             this._elapsedSeconds = 0;
             this.startTimer();
+            TutorialManager.getInstance().onGameplayReady(levelId, { skipTutorial: options?.skipTutorial });
         } catch (err) {
                         this.returnToMenu();
         } finally {
@@ -555,6 +564,7 @@ export class GameManager extends Component {
 
     /** Thoát về menu */
     public async returnToMenu(): Promise<void> {
+        TutorialManager.getInstance().abort();
         this.stopTimer();
         this.setState(GameState.MAIN_MENU);
         this._preparedHomeLevelId = 0;
@@ -908,6 +918,7 @@ export class GameManager extends Component {
         rewardNode.setPosition(0, 0, 0);
         rewardNode.addComponent(RewardVideoPlayer);
         rewardNode.setSiblingIndex(parent.children.length - 1);
+        AudioManager.getInstance()?.bindButtonSounds(rewardNode);
     }
 
     /** HUD ★ trên Canvas (kéo thả StarTopBar trong editor). */
@@ -929,6 +940,7 @@ export class GameManager extends Component {
         hudNode.setPosition(0, 0, 0);
         hudNode.addComponent(StarWalletHud);
         hudNode.setSiblingIndex(parent.children.length - 1);
+        AudioManager.getInstance()?.bindButtonSounds(hudNode);
     }
 
     /** Popup thông báo (level 50 / top-up) — prefab `prefabs/ui/panel_notice`, kéo vào Canvas để chỉnh. */
@@ -958,6 +970,7 @@ export class GameManager extends Component {
             node.setPosition(0, 0, 0);
             node.layer = parent.layer;
             node.active = false;
+            AudioManager.getInstance()?.bindButtonSounds(node);
             console.log('[GameManager] Đã spawn NoticePopupPanel từ prefab — mở prefab/scene để chỉnh layout.');
         });
     }

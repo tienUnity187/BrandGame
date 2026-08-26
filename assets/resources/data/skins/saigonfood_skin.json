@@ -90,6 +90,11 @@
         "key": "panel_NoticePopupPanel",
         "path": "prefabs/ui/panel_notice",
         "assetType": "prefab"
+      },
+      {
+        "key": "panel_TutorialOverlay",
+        "path": "prefabs/ui/panel_tutorial",
+        "assetType": "prefab"
       }
     ],
     "particle": [

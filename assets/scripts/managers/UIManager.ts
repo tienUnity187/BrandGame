@@ -59,6 +59,7 @@ export class UIManager extends Component {
     public async openPanel(panelName: string, data?: any): Promise<BasePanel | null> {
         if (this._panelMap.has(panelName)) {
             const panel = this._panelMap.get(panelName)!;
+            AudioManager.getInstance()?.bindButtonSounds(panel.node);
             panel.show(data);
             this.bringPanelToFront(panelName);
             if (this._panelStack.indexOf(panelName) === -1) {

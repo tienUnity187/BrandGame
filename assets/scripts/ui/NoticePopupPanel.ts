@@ -13,6 +13,7 @@ import {
     Widget,
     view,
 } from 'cc';
+import { AudioManager } from '../managers/AudioManager';
 
 const { ccclass, property } = _decorator;
 
@@ -88,6 +89,7 @@ export class NoticePopupPanel extends Component {
         if (this.titleLabel) this.titleLabel.string = title;
         if (this.bodyLabel) this.bodyLabel.string = message;
         this.mountOnCanvas();
+        AudioManager.getInstance()?.bindButtonSounds(this.node);
         this.node.active = true;
         if (this.backgroundBlocker) this.backgroundBlocker.active = true;
         if (this.contentNode) {

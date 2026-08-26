@@ -698,6 +698,7 @@ export class RewardVideoPlayer extends Component {
     private ensureUi(): void {
         if (this.videoPlayer && this.videoContainer) {
             this.ensureCloseButton();
+            AudioManager.getInstance()?.bindButtonSounds(this.node);
             return;
         }
 
@@ -760,6 +761,7 @@ export class RewardVideoPlayer extends Component {
         this.videoContainer = container;
         this.videoPlayer = videoPlayer;
         this.ensureCloseButton();
+        AudioManager.getInstance()?.bindButtonSounds(this.node);
     }
 
     /** Luôn có nút X góc trên phải để đóng video. */
@@ -824,5 +826,6 @@ export class RewardVideoPlayer extends Component {
         if (this._eventsBound) {
             this._closeButton.node.on(Button.EventType.CLICK, this.btnClose, this);
         }
+        AudioManager.getInstance()?.bindButtonSounds(this.node);
     }
 }
