@@ -407,7 +407,7 @@
       "b": 90,
       "a": 255
     },
-    "_string": "Insufficient Tevi Stars",
+    "_string": "Not enough coins",
     "_horizontalAlign": 1,
     "_verticalAlign": 1,
     "_actualFontSize": 38,
@@ -766,7 +766,7 @@
       "b": 255,
       "a": 255
     },
-    "_string": "Not enough Tevi Stars.\n\nYour wallet: 0 ★\nThis pack needs: 100 ★\n\nTop up your Tevi wallet first, then try again.",
+    "_string": "Not enough coins.\n\nYour wallet: 0\nThis pack needs: 100\n\nTop up your Tevi wallet first, then try again.",
     "_horizontalAlign": 1,
     "_verticalAlign": 1,
     "_actualFontSize": 30,

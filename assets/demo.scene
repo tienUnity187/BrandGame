@@ -4898,7 +4898,7 @@
       "b": 255,
       "a": 255
     },
-    "_string": "100 Star → 100",
+    "_string": "100 → 100",
     "_horizontalAlign": 1,
     "_verticalAlign": 1,
     "_actualFontSize": 28,
@@ -5310,7 +5310,7 @@
       "b": 255,
       "a": 255
     },
-    "_string": "500 Star → 500",
+    "_string": "500 → 500",
     "_horizontalAlign": 1,
     "_verticalAlign": 1,
     "_actualFontSize": 28,
@@ -5722,7 +5722,7 @@
       "b": 255,
       "a": 255
     },
-    "_string": "1000 Star→ 1000",
+    "_string": "1000 → 1000",
     "_horizontalAlign": 1,
     "_verticalAlign": 1,
     "_actualFontSize": 28,

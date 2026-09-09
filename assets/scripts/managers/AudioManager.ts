@@ -81,25 +81,21 @@ export class AudioManager extends Component {
     }
 
     /**
-     * Boot nhẹ cho Splash→Home: chỉ load SFX cần ngay (click nút).
-     * BGM / win-lose / gameplay SFX load lazy hoặc qua preloadRemainingAssets().
+     * Boot nhẹ cho Splash→Home: chỉ load SFX click.
+     * BGM / win-lose load đúng lúc phát; gameplay SFX warm khi vào level.
      */
     public async initialize(): Promise<void> {
         await this.loadClip('button-click');
     }
 
-    /** Preload phần audio còn lại khi đã vào Home (không chặn splash). */
-    public async preloadRemainingAssets(): Promise<void> {
+    /** SFX nhỏ khi bắt đầu chơi — không preload BGM / win-lose. */
+    public async preloadGameplaySfx(): Promise<void> {
         await Promise.all([
-            ...AudioManager.MAIN_MUSIC_KEYS.map(key => this.loadClip(key)),
-            ...AudioManager.PANEL_WIN_KEYS.map(key => this.loadClip(key)),
-            ...AudioManager.PANEL_LOSE_KEYS.map(key => this.loadClip(key)),
-            this.loadClip('button-click'),
+            this.loadClip('tile_click'),
+            this.loadClip('tile_fall'),
             this.loadClip('order-complete'),
             this.loadClip('ohh'),
             this.loadClip('ohh2'),
-            this.loadClip('tile_click'),
-            this.loadClip('tile_fall'),
         ]);
     }
 
@@ -212,8 +208,10 @@ export class AudioManager extends Component {
 
         if (!hasOldTrack || duration <= 0) {
             oldSource.stop();
+            oldSource.clip = null;
             newSource.volume = duration > 0 ? 0 : this._musicVolume;
             newSource.play();
+            this.releaseUnusedMusicClips(key);
             if (duration > 0) {
                 await this.tweenMusicVolume(newSource, this._musicVolume, duration, token);
             }
@@ -228,7 +226,9 @@ export class AudioManager extends Component {
         await Promise.all([fadeOut, fadeIn]);
         if (token !== this._musicFadeToken) return;
         oldSource.stop();
+        oldSource.clip = null;
         oldSource.volume = this._musicVolume;
+        this.releaseUnusedMusicClips(key);
     }
 
     /** Random 1 trong 6 bài bg-main (tránh lặp bài đang phát). Mặc định crossfade. */
@@ -391,6 +391,17 @@ export class AudioManager extends Component {
                 resolve(clip);
             });
         });
+    }
+
+    /** Chỉ giữ 1 BGM decoded — các track còn lại load lại khi random tới. */
+    private releaseUnusedMusicClips(keepKey: string): void {
+        for (const musicKey of AudioManager.MAIN_MUSIC_KEYS) {
+            if (musicKey === keepKey) continue;
+            const clip = this._clipCache.get(musicKey);
+            if (!clip) continue;
+            this._clipCache.delete(musicKey);
+            resources.release(`audio/${musicKey}`);
+        }
     }
 
     protected onDestroy(): void {

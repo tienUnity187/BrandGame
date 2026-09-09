@@ -208,10 +208,10 @@ export class StarWalletHud extends Component {
         }
         const last = store.getLastTopUpOrder();
         StarWalletHud.logStatus(
-            `Claim: waiting for stars${last ? ` (${last.orderId})` : ''}...`,
+            `Claim: waiting for coins${last ? ` (${last.orderId})` : ''}...`,
         );
         this.showPendingBanner(
-            'Payment successful!\nWaiting for stars...',
+            'Payment successful!\nWaiting for coins...',
         );
         EventBus.getInstance().emit(GameEvent.REQUEST_CLAIM_PENDING_TOPUPS);
     }
@@ -632,12 +632,55 @@ export class StarWalletHud extends Component {
     private showPendingBanner(message: string): void {
         this.ensurePendingBanner();
         if (this._pendingBannerLabel) this._pendingBannerLabel.string = message;
-        if (this._pendingBannerRoot) this._pendingBannerRoot.active = true;
-        this.bringToFront();
+        if (this._pendingBannerRoot) {
+            this.mountPendingBannerOnCanvas();
+            this._pendingBannerRoot.active = true;
+            console.log('[StarWalletHud] Pending banner shown:', message.replace(/\n/g, ' / '));
+        }
+    }
+
+    private mountPendingBannerOnCanvas(): void {
+        const canvas = this.getCanvasNode();
+        const banner = this._pendingBannerRoot;
+        if (!banner?.isValid || !canvas?.isValid) return;
+        if (banner.parent !== canvas) {
+            banner.setParent(canvas);
+        }
+        banner.layer = canvas.layer;
+        banner.setPosition(0, 0, 0);
+        this.alignToCanvas(banner, { top: 96, topCenter: true });
+        banner.setSiblingIndex(canvas.children.length - 1);
+        banner.getComponent(Widget)?.updateAlignment();
     }
 
     private hidePendingBanner(): void {
         if (this._pendingBannerRoot) this._pendingBannerRoot.active = false;
+    }
+
+    /** Editor/Preview: bật/tắt banner chờ nạp để test layout (phím U). */
+    public debugTogglePendingBanner(): void {
+        if (!this.isEditorOrPreview()) return;
+        this.ensurePendingBanner();
+        if (this._pendingBannerRoot?.active) {
+            this.hidePendingBanner();
+            console.log('[StarWalletHud][Debug] Pending banner hidden');
+            return;
+        }
+        this.showPendingBanner('Payment successful!\nWaiting for coins...');
+    }
+
+    /** Editor/Preview: giả lập mở lại app khi còn order chờ cộng coin. */
+    public debugSimulatePendingTopUpOnBoot(): void {
+        if (!this.isEditorOrPreview()) return;
+        TopUpPendingStore.getInstance().addPending({
+            orderId: `mock-editor-${Date.now()}`,
+            packId: 'pack_100',
+            stars: 100,
+            createdAt: Date.now(),
+            confirmed: true,
+        });
+        this.checkPendingTopUpOnBoot();
+        console.log('[StarWalletHud][Debug] Simulated pending top-up on boot');
     }
 
     /** Popup top-up (thiếu sao / failed / success) — prefab `panel_topup_result`. */
@@ -771,6 +814,30 @@ export class StarWalletHud extends Component {
         }));
     }
 
+    private presentTopUpErrorPopup(message: string): void {
+        const walletMatch = message.match(/Your wallet:\s*(\d+)/i);
+        const needMatch = message.match(/(?:This pack needs|needs):\s*(\d+)/i);
+        const isCoinShortage = /not enough (tevi )?stars|not enough coins/i.test(message);
+        if (isCoinShortage && walletMatch && needMatch) {
+            const wallet = Number(walletMatch[1]);
+            const need = Number(needMatch[1]);
+            this.ensureTopUpResultPopup(() => {
+                const panel = TopUpResultPopupPanel.Instance;
+                if (!panel?.node?.isValid) {
+                    this.showResultPopup('Not enough coins', message);
+                    return;
+                }
+                panel.show('Not enough coins', message, undefined, {
+                    topUpBarSource: this.getCoinBarNode(),
+                    walletShortage: { wallet, need },
+                });
+            });
+            return;
+        }
+        const title = isCoinShortage ? 'Not enough coins' : 'Top-up failed';
+        this.showResultPopup(title, message.replace(/★/g, '').replace(/\s{2,}/g, ' '));
+    }
+
     private presentInsufficientBoosterPopup(
         title: string,
         message: string,
@@ -836,11 +903,11 @@ export class StarWalletHud extends Component {
             onTeviDialogClosed: (ok) => {
                 this.hideWaiting();
                 if (ok) {
-                    this.showPendingBanner('Payment successful!\nWaiting for stars...');
+                    this.showPendingBanner('Payment successful!\nAdding coins...');
                 }
             },
             onAwaitingStars: () => {
-                this.showPendingBanner('Payment successful!\nWaiting for stars...');
+                this.showPendingBanner('Payment successful!\nAdding coins...');
             },
             onSuccess: (stars, balance) => {
                 this.hidePendingBanner();
@@ -850,11 +917,8 @@ export class StarWalletHud extends Component {
             onError: (message) => {
                 this.hidePendingBanner();
                 this.hideWaiting();
-                const title = /not enough tevi stars/i.test(message)
-                    ? 'Insufficient Tevi Stars'
-                    : 'Top-up failed';
                 this._resultPopupOnClose = null;
-                this.showResultPopup(title, message);
+                this.presentTopUpErrorPopup(message);
             },
         };
     }
@@ -888,14 +952,16 @@ export class StarWalletHud extends Component {
                 onTeviDialog: () => this.showWaiting('Simulating Tevi...'),
                 onTeviDialogClosed: (ok) => {
                     this.hideWaiting();
-                    if (ok) this.showPendingBanner('Simulated payment OK\nWaiting for stars...');
+                    if (ok) {
+                        this.showPendingBanner('Simulated payment OK\nAdding coins...');
+                    }
                 },
             });
             this.hideWaiting();
-            this.hidePendingBanner();
             if (mockResult.ok) {
                 this.refreshBalance();
             } else {
+                this.hidePendingBanner();
                 options.onError?.(mockResult.message);
             }
             return;
@@ -938,13 +1004,15 @@ export class StarWalletHud extends Component {
             onTeviDialog: () => this.showWaiting('Simulating Tevi...'),
             onTeviDialogClosed: (ok) => {
                 this.hideWaiting();
-                if (ok) this.showPendingBanner('Simulated payment OK\nWaiting for stars...');
+                if (ok) {
+                    this.showPendingBanner('Simulated payment OK\nAdding coins...');
+                }
             },
         });
 
         this.hideWaiting();
-        this.hidePendingBanner();
         if (!result.ok) {
+            this.hidePendingBanner();
             options.onError?.(result.message);
         }
         this.refreshBalance();

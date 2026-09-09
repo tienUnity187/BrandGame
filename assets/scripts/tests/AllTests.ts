@@ -5,6 +5,7 @@ import { runBoosterManagerTests } from './BoosterManager.test';
 import { runLevelGeneratorTests } from './LevelGenerator.test';
 import { runSmartLevelGeneratorTests } from './SmartLevelGenerator.test';
 import { runTileManagerTests } from './TileManager.test';
+import { runTeviPaymentServiceTests } from './TeviPaymentService.test';
 
 /**
  * Chạy toàn bộ unit test cho gameplay core.
@@ -21,6 +22,7 @@ export function runAllTests(): void {
         runLevelGeneratorTests(),
         runSmartLevelGeneratorTests(),
         runTileManagerTests(),
+        runTeviPaymentServiceTests(),
     ];
 
     let totalPassed = 0;

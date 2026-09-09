@@ -33,6 +33,8 @@ import { NoticePopupPanel } from '../ui/NoticePopupPanel';
 const { ccclass, property } = _decorator;
 const WIN_CURRENT_LEVEL_CHEAT_KEY_CODE = 84; // T
 const BOOSTER_CHEAT_KEY_CODE = 66; // B
+const PENDING_BANNER_DEBUG_KEY_CODE = 85; // U — Editor: toggle top-up pending banner
+const PENDING_BOOT_DEBUG_KEY_CODE = 89; // Y — Editor: simulate pending top-up on boot
 const FINAL_LEVEL_ID = 50;
 const FINAL_LEVEL_NOTICE_TITLE = 'Level 50 Complete!';
 const FINAL_LEVEL_NOTICE_MESSAGE =
@@ -170,7 +172,7 @@ export class GameManager extends Component {
         }
 
         // Listen for level end events to switch panels (registered early in onLoad).
-        // Editor cheats: 1-9 level, R restart, N next, T win level hiện tại, B booster cheat.
+        // Editor cheats: 1-9 level, R restart, N next, T win level hiện tại, B booster cheat, U pending banner.
         input.on(Input.EventType.KEY_DOWN, this.onKeyDown, this);
         this.bindLevelJumpUI();
         this.bindHomeUI();
@@ -180,10 +182,18 @@ export class GameManager extends Component {
         void this.tryClaimPendingTopUps();
     }
 
-    /** Editor cheats: 1-9 đổi level, R restart, N next, T thắng level hiện tại, B bật booster. */
+    /** Editor cheats: 1-9 đổi level, R restart, N next, T thắng, B booster, U banner chờ nạp, Y giả lập boot pending. */
     private onKeyDown(event: EventKeyboard): void {
         if (!this.isEditorCheatEnabled()) return;
         const key = event.keyCode;
+        if (key === PENDING_BANNER_DEBUG_KEY_CODE) {
+            StarWalletHud.Instance?.debugTogglePendingBanner();
+            return;
+        }
+        if (key === PENDING_BOOT_DEBUG_KEY_CODE) {
+            StarWalletHud.Instance?.debugSimulatePendingTopUpOnBoot();
+            return;
+        }
         if (key === WIN_CURRENT_LEVEL_CHEAT_KEY_CODE) {
             void this.runWinCurrentLevelCheat();
             return;
@@ -343,7 +353,7 @@ export class GameManager extends Component {
 
     /**
      * Boot tối thiểu để hiện Home nhanh trên web.
-     * Audio nặng (~BGM), tile sprites và UI panels được warm sau khi Home hiện.
+     * BGM / panel / tile sprite load lazy — chỉ warm prefab HUD sau Home.
      */
     private async initializeGame(): Promise<void> {
         this.setState(GameState.LOADING);
@@ -393,26 +403,14 @@ export class GameManager extends Component {
         this.setState(GameState.MAIN_MENU);
     }
 
-    /** Warm asset nặng sau Splash→Home để không treo splash trên web. */
+    /** Home idle: chỉ cache prefab HUD — không load hết audio/sprite/panel. */
     private deferredBootWarmup(): void {
         void this.runDeferredBootWarmup();
     }
 
     private async runDeferredBootWarmup(): Promise<void> {
-        const audioMgr = AudioManager.getInstance();
-        const skinMgr = SkinManager.getInstance();
         try {
-            await Promise.all([
-                audioMgr?.preloadRemainingAssets() ?? Promise.resolve(),
-                skinMgr?.prewarmSkinSprites() ?? Promise.resolve(),
-                UIManager.getInstance().preloadPanels([
-                    'GameplayPanel',
-                    'LevelCompletePanel',
-                    'LevelFailedPanel',
-                    'LevelSelectPanel',
-                    'RewardVideoGalleryPanel',
-                ]),
-            ]);
+            await UIManager.getInstance().preloadPanel('GameplayPanel');
         } catch (err) {
             console.warn('[Boot] Deferred warmup failed (non-blocking):', err);
         }
@@ -474,6 +472,7 @@ export class GameManager extends Component {
 
         // Random BGM + crossfade mỗi lần vào / qua level
         AudioManager.getInstance()?.playRandomMainMusic();
+        void AudioManager.getInstance()?.preloadGameplaySfx();
 
         // Ensure ORDER_MATCH managers exist in scene
                 this.ensureOrderManagers();
@@ -573,6 +572,13 @@ export class GameManager extends Component {
         UIManager.getInstance().closePanel('LevelCompletePanel');
         UIManager.getInstance().closePanel('LevelFailedPanel');
         UIManager.getInstance().closePanel('LevelSelectPanel');
+        UIManager.getInstance().destroyClosedPanels([
+            'GameplayPanel',
+            'LevelCompletePanel',
+            'LevelFailedPanel',
+            'LevelSelectPanel',
+            'RewardVideoGalleryPanel',
+        ]);
         UIManager.getInstance().hideLoading();
         await this.transitionToHome();
     }

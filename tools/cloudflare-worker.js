@@ -1,6 +1,11 @@
 /**
  * VelvetNight — Cloudflare Worker (dán vào Dashboard → fancy-sun-962d)
- * WORKER_VERSION: 1.0.16
+ * WORKER_VERSION: 1.0.17
+ *
+ * 1.0.17: KV edge cache ~60s làm poll status kẹt pending dù webhook Tevi về ngay.
+ *   — TeviJS.topup call=ok = đã trừ Star → Worker mark paid ngay (cùng colo user).
+ *   — KV get cacheTtl=0 + paid-flag key (không đọc key này khi còn pending).
+ *   — Match webhook qua user-pending:{userId} (Tevi chỉ gửi exchange_id UUID, không gửi ORD_*).
  *
  * Routes:
  *   POST /api/video-token
@@ -29,7 +34,7 @@
  *   TEVI_API_KEY          ← Tevi API key (chỉ trên Worker, không đưa vào game)
  */
 
-const WORKER_VERSION = "1.0.16";
+const WORKER_VERSION = "1.0.17";
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 /** Game clip 1–13 → vn_reward_01.mp4…13.mp4; alias legacy nếu R2 còn tên cũ. */
@@ -56,6 +61,10 @@ for (const [canonical, alts] of Object.entries(REWARD_LEGACY_ALIASES)) {
   }
 }
 const ORDER_TTL_SECONDS = 86400;
+/** Isolate-local cache — webhook + poll trùng isolate thì thấy paid ngay, không chờ KV replicate. */
+const HOT_TTL_MS = 5 * 60 * 1000;
+const hotOrders = new Map();
+const hotByUserAmount = new Map();
 
 export default {
   async fetch(request, env) {
@@ -210,27 +219,114 @@ function exchangeKey(exchangeId) {
   return `exchange:${exchangeId}`;
 }
 
+function paidFlagKey(orderId) {
+  return `paid-flag:${orderId}`;
+}
+
+function userPendingKey(userId) {
+  return `user-pending:${userId}`;
+}
+
+function userAmountKey(userId, amount) {
+  return `${userId}:${Number(amount) || 0}`;
+}
+
+function rememberHot(record) {
+  if (!record?.order_id) return;
+  const entry = { record, at: Date.now() };
+  hotOrders.set(record.order_id, entry);
+  if (record.user_id != null && record.amount != null) {
+    hotByUserAmount.set(userAmountKey(record.user_id, record.amount), entry);
+  }
+}
+
+function recallHot(orderId) {
+  const entry = hotOrders.get(orderId);
+  if (!entry) return null;
+  if (Date.now() - entry.at > HOT_TTL_MS) {
+    hotOrders.delete(orderId);
+    return null;
+  }
+  return entry.record;
+}
+
+function recallHotByUserAmount(userId, amount) {
+  const entry = hotByUserAmount.get(userAmountKey(userId, amount));
+  if (!entry) return null;
+  if (Date.now() - entry.at > HOT_TTL_MS) {
+    hotByUserAmount.delete(userAmountKey(userId, amount));
+    return null;
+  }
+  return entry.record;
+}
+
+/** cacheTtl: 0 = đọc origin, tránh edge cache 60s giữ status=pending. */
+async function kvGet(env, key) {
+  if (!env.TOPUP_ORDERS) return null;
+  try {
+    return await env.TOPUP_ORDERS.get(key, { cacheTtl: 0 });
+  } catch {
+    return env.TOPUP_ORDERS.get(key);
+  }
+}
+
+async function kvPut(env, key, value) {
+  if (!env.TOPUP_ORDERS) return;
+  const text = typeof value === "string" ? value : JSON.stringify(value);
+  await env.TOPUP_ORDERS.put(key, text, { expirationTtl: ORDER_TTL_SECONDS });
+}
+
+function isSdkTopupSuccess(sdk) {
+  if (!sdk || typeof sdk !== "object") return false;
+  const callOk = `${sdk.call || ""}` === "ok";
+  const code = sdk.error_code;
+  const hasError = code !== undefined && code !== null && `${code}` !== "" && `${code}` !== "0";
+  return callOk || !hasError;
+}
+
 async function saveOrder(env, record) {
+  rememberHot(record);
   if (!env.TOPUP_ORDERS) {
     console.warn("[Worker] TOPUP_ORDERS KV not bound — order not persisted");
     return;
   }
-  const text = JSON.stringify(record);
-  await env.TOPUP_ORDERS.put(orderKey(record.order_id), text, { expirationTtl: ORDER_TTL_SECONDS });
+  await kvPut(env, orderKey(record.order_id), record);
   if (record.exchange_id) {
-    await env.TOPUP_ORDERS.put(exchangeKey(record.exchange_id), record.order_id, { expirationTtl: ORDER_TTL_SECONDS });
+    await kvPut(env, exchangeKey(record.exchange_id), record.order_id);
+  }
+  if (record.status === "paid") {
+    // Key mới — poll chưa từng GET nên không bị cache pending 60s.
+    await kvPut(env, paidFlagKey(record.order_id), record.order_id);
+    if (record.user_id) {
+      const latest = await kvGet(env, userPendingKey(record.user_id));
+      if (latest === record.order_id) {
+        await env.TOPUP_ORDERS.delete(userPendingKey(record.user_id));
+      }
+    }
+  } else if (record.user_id && record.status === "pending") {
+    await kvPut(env, userPendingKey(record.user_id), record.order_id);
   }
 }
 
 async function loadOrder(env, orderId) {
-  if (!env.TOPUP_ORDERS) return null;
-  const raw = await env.TOPUP_ORDERS.get(orderKey(orderId));
-  if (!raw) return null;
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return null;
+  const hot = recallHot(orderId);
+  let kv = null;
+  if (env.TOPUP_ORDERS) {
+    const raw = await kvGet(env, orderKey(orderId));
+    if (raw) {
+      try { kv = JSON.parse(raw); } catch { kv = null; }
+    }
   }
+  if (hot?.status === "paid" && kv?.status !== "paid") {
+    return { ...kv, ...hot };
+  }
+  return kv || hot;
+}
+
+async function isPaidFlagSet(env, orderId) {
+  if (recallHot(orderId)?.status === "paid") return true;
+  const flag = await kvGet(env, paidFlagKey(orderId));
+  return !!flag;
 }
 
 function orderAgeSeconds(record) {
@@ -268,8 +364,8 @@ function buildPendingHint(record, env) {
 }
 
 async function resolveOrderIdFromExchange(env, exchangeId) {
-  if (!env.TOPUP_ORDERS || !exchangeId) return null;
-  return env.TOPUP_ORDERS.get(exchangeKey(exchangeId));
+  if (!exchangeId) return null;
+  return kvGet(env, exchangeKey(exchangeId));
 }
 
 /* ===================== VIDEO (giữ nguyên) ===================== */
@@ -460,6 +556,14 @@ async function createTopUpSignature(request, env) {
   }
 
   if (teviRes.ok && teviJson.success !== false) {
+    const depositToken = extractDepositTokenFromPayload(teviJson);
+    const tokenClaims = decodeJwtPayload(depositToken) || {};
+    const tokenExchangeId = String(
+      tokenClaims.exchange_id
+      || tokenClaims.exchangeId
+      || tokenClaims.jti
+      || "",
+    ).trim() || null;
     await saveOrder(env, {
       order_id: orderId,
       status: "pending",
@@ -469,8 +573,15 @@ async function createTopUpSignature(request, env) {
       stars,
       pack_id: packId,
       created_at: new Date().toISOString(),
-      exchange_id: null,
+      exchange_id: tokenExchangeId,
     });
+    if (env.TOPUP_ORDERS) {
+      for (const extraId of collectTokenIds(tokenClaims, depositToken)) {
+        if (extraId && extraId !== tokenExchangeId) {
+          await kvPut(env, exchangeKey(extraId), orderId);
+        }
+      }
+    }
   }
 
   if (teviJson && typeof teviJson === "object") {
@@ -505,7 +616,8 @@ async function getTopUpStatus(request, env) {
   const orderId = new URL(request.url).searchParams.get("order_id") || "";
   if (!orderId.trim()) return json({ success: false, message: "Missing order_id" }, 400, request, env);
 
-  const record = await loadOrder(env, orderId.trim());
+  const orderIdTrim = orderId.trim();
+  let record = await loadOrder(env, orderIdTrim);
   if (!record) {
     return json({
       success: true,
@@ -517,10 +629,22 @@ async function getTopUpStatus(request, env) {
     }, 200, request, env);
   }
 
+  if (record.status !== "paid" && await isPaidFlagSet(env, orderIdTrim)) {
+    record = {
+      ...record,
+      status: "paid",
+      paid_via: record.paid_via || "paid-flag",
+      paid_at: record.paid_at || new Date().toISOString(),
+    };
+    await saveOrder(env, record);
+  }
+
   const hint = record.status === "pending"
     ? buildPendingHint(record, env)
     : record.status === "paid"
-      ? "Webhook user_topup đã xác nhận thanh toán."
+      ? (record.paid_via === "sdk"
+        ? "TeviJS.topup đã xác nhận thanh toán."
+        : "Webhook user_topup đã xác nhận thanh toán.")
       : (record.failure_reason || "Giao dịch thất bại.");
 
   return json({
@@ -531,6 +655,7 @@ async function getTopUpStatus(request, env) {
     amount: record.amount,
     exchange_id: record.exchange_id,
     webhook_event: record.webhook_event,
+    paid_via: record.paid_via || null,
     paid_at: record.paid_at,
     pending_seconds: orderAgeSeconds(record),
     sdk_callback: record.sdk_callback || null,
@@ -560,7 +685,7 @@ async function getTopUpUnclaimed(request, env) {
   const list = await env.TOPUP_ORDERS.list({ prefix: "order:" });
   const orders = [];
   for (const key of list.keys) {
-    const raw = await env.TOPUP_ORDERS.get(key.name);
+    const raw = await kvGet(env, key.name);
     if (!raw) continue;
     let rec;
     try { rec = JSON.parse(raw); } catch { continue; }
@@ -643,7 +768,44 @@ async function claimTopUpOrder(request, env) {
 }
 
 function extractUserIdFromClaims(user) {
-  return String(user?.user_id || user?.userId || user?.sub || user?.id || "").trim();
+  return String(
+    user?.user_id
+    || user?.userId
+    || user?.sub
+    || user?.id
+    || user?.data?.user_id
+    || user?.data?.userId
+    || user?.data?.id
+    || "",
+  ).trim();
+}
+
+function extractDepositTokenFromPayload(payload) {
+  const data = payload?.data && typeof payload.data === "object" ? payload.data : null;
+  const candidates = [
+    data?.deposit_token,
+    data?.signature,
+    data?.token,
+    data?.top_up_signature,
+    payload?.deposit_token,
+    payload?.signature,
+  ];
+  for (const value of candidates) {
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return "";
+}
+
+function collectTokenIds(claims, depositToken) {
+  const ids = new Set();
+  for (const key of ["exchange_id", "exchangeId", "order_id", "orderId", "jti", "id", "channel_id", "channelId"]) {
+    const value = claims?.[key];
+    if (value !== undefined && value !== null && `${value}`.trim()) {
+      ids.add(`${value}`.trim());
+    }
+  }
+  if (depositToken) ids.add(depositToken.slice(0, 48));
+  return [...ids];
 }
 
 async function reportTopUpSdkCallback(request, env) {
@@ -667,17 +829,31 @@ async function reportTopUpSdkCallback(request, env) {
     return json({ success: false, message: "Order not found", order_id: orderId }, 404, request, env);
   }
 
+  const sdkOk = isSdkTopupSuccess(sdkCallback);
+  const alreadyPaid = existing.status === "paid";
   const record = {
     ...existing,
     sdk_callback: sdkCallback,
     sdk_reported_at: new Date().toISOString(),
+    // Cùng colo với game poll — mark paid ngay, không chờ webhook replicate từ colo Tevi (~60s).
+    ...(sdkOk && !alreadyPaid
+      ? {
+          status: "paid",
+          paid_via: "sdk",
+          paid_at: existing.paid_at || new Date().toISOString(),
+        }
+      : {}),
   };
   await saveOrder(env, record);
 
   return json({
     success: true,
     order_id: orderId,
-    hint: buildPendingHint(record, env),
+    status: record.status,
+    paid_via: record.paid_via || null,
+    hint: record.status === "paid"
+      ? "SDK confirmed — order marked paid."
+      : buildPendingHint(record, env),
     worker_version: WORKER_VERSION,
   }, 200, request, env);
 }
@@ -761,20 +937,23 @@ async function processUserTopupWebhook(env, payload) {
     if (!orderId && exchangeId.startsWith("ORD_")) orderId = exchangeId;
   }
 
+  // Tevi webhook chỉ có exchange_id UUID — không echo ORD_* mà Worker gửi lúc signature.
+  if (!orderId && userId) {
+    const latest = await kvGet(env, userPendingKey(userId));
+    if (latest) orderId = latest;
+  }
+
+  if (!orderId && userId && Number.isFinite(amount)) {
+    const hot = recallHotByUserAmount(userId, amount);
+    if (hot?.order_id) orderId = hot.order_id;
+  }
+
   if (!orderId && env.TOPUP_ORDERS && userId) {
-    // Fallback: tìm pending gần nhất cùng user (best-effort)
-    const list = await env.TOPUP_ORDERS.list({ prefix: "order:" });
-    for (const key of list.keys) {
-      const rec = JSON.parse(await env.TOPUP_ORDERS.get(key.name));
-      if (rec?.status === "pending" && `${rec.user_id}` === userId) {
-        orderId = rec.order_id;
-        break;
-      }
-    }
+    orderId = await findPendingOrderForUser(env, userId, amount);
   }
 
   if (!orderId) {
-    console.warn("[TeviWebhook] user_topup: no matching order", { exchangeId, userId });
+    console.warn("[TeviWebhook] user_topup: no matching order", { exchangeId, userId, amount });
     await saveOrphanWebhookNote(env, userId, exchangeId, payload);
     return;
   }
@@ -784,23 +963,63 @@ async function processUserTopupWebhook(env, payload) {
     ...(existing || {}),
     order_id: orderId,
     status: "paid",
+    paid_via: existing?.paid_via === "sdk" ? "sdk+webhook" : "webhook",
     exchange_id: exchangeId || existing?.exchange_id,
     user_id: userId || existing?.user_id,
     amount: Number.isFinite(amount) ? amount : existing?.amount,
     app_id: appId || existing?.app_id,
     webhook_event: "user_topup",
     webhook_id: payload.id,
-    paid_at: payload.created_at || new Date().toISOString(),
+    paid_at: existing?.paid_at || payload.created_at || new Date().toISOString(),
   };
   await saveOrder(env, record);
+}
+
+async function findPendingOrderForUser(env, userId, amount) {
+  const list = await env.TOPUP_ORDERS.list({ prefix: "order:" });
+  const matches = [];
+  for (const key of list.keys) {
+    const raw = await kvGet(env, key.name);
+    if (!raw) continue;
+    let rec;
+    try { rec = JSON.parse(raw); } catch { continue; }
+    if (`${rec?.user_id}` !== userId) continue;
+    if (rec.status === "failed") continue;
+    const amountOk = !Number.isFinite(amount) || Number(rec.amount) === amount;
+    if (!amountOk && rec.status !== "pending") continue;
+    matches.push(rec);
+  }
+  if (matches.length === 0) return null;
+  matches.sort((a, b) => {
+    const amountRank = (Number(b.amount) === amount ? 1 : 0) - (Number(a.amount) === amount ? 1 : 0);
+    if (amountRank !== 0) return amountRank;
+    return String(b.created_at || "").localeCompare(String(a.created_at || ""));
+  });
+  return matches[0].order_id;
 }
 
 /** Ghi chú lên order pending gần nhất khi webhook không khớp exchange_id. */
 async function saveOrphanWebhookNote(env, userId, exchangeId, payload) {
   if (!env.TOPUP_ORDERS || !userId) return;
+  const latestId = await kvGet(env, userPendingKey(userId));
+  if (latestId) {
+    const rec = await loadOrder(env, latestId);
+    if (rec && rec.status !== "paid") {
+      rec.webhook_note =
+        `Webhook user_topup tới nhưng không khớp order (exchange_id=${exchangeId || "?"}). `
+        + "Hỏi Tevi exchange_id có map order_id Worker không.";
+      rec.last_webhook_id = payload.id;
+      rec.last_webhook_at = payload.created_at || new Date().toISOString();
+      await saveOrder(env, rec);
+      return;
+    }
+  }
   const list = await env.TOPUP_ORDERS.list({ prefix: "order:" });
   for (const key of list.keys) {
-    const rec = JSON.parse(await env.TOPUP_ORDERS.get(key.name));
+    const raw = await kvGet(env, key.name);
+    if (!raw) continue;
+    let rec;
+    try { rec = JSON.parse(raw); } catch { continue; }
     if (rec?.status === "pending" && `${rec.user_id}` === userId) {
       rec.webhook_note =
         `Webhook user_topup tới nhưng không khớp order (exchange_id=${exchangeId || "?"}). `

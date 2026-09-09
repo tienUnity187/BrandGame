@@ -6,7 +6,10 @@ import {
     Graphics,
     Label,
     Layers,
+    Layout,
+    Mask,
     Node,
+    ScrollView,
     UITransform,
     Widget,
     director,
@@ -47,7 +50,11 @@ export class RewardVideoGalleryPanel extends BasePanel {
     @property(Button)
     public closeButton: Button | null = null;
 
+    @property(ScrollView)
+    public listScrollView: ScrollView | null = null;
+
     private _runtimeBuilt = false;
+    private _listViewHeight = 700;
 
     protected onLoad(): void {
         if (RewardVideoGalleryPanel.Instance && RewardVideoGalleryPanel.Instance !== this) {
@@ -115,6 +122,7 @@ export class RewardVideoGalleryPanel extends BasePanel {
 
     private rebuildList(): void {
         this.ensureRuntimeUi();
+        this.ensureScrollView();
         if (!this.listRoot) return;
         this.listRoot.removeAllChildren();
 
@@ -125,17 +133,42 @@ export class RewardVideoGalleryPanel extends BasePanel {
                 this.emptyLabel.string = `No clips yet.\nBeat levels ${REWARD_VIDEO_UNLOCK_LEVELS.join(', ')} to unlock clips.`;
             }
         }
-        if (watched.length === 0) return;
 
         const itemWidth = 560;
-        const totalH = watched.length * ITEM_HEIGHT + Math.max(0, watched.length - 1) * ITEM_GAP;
-        const startY = totalH * 0.5 - ITEM_HEIGHT * 0.5;
+        const paddingY = 8;
+        const totalH = watched.length > 0
+            ? watched.length * ITEM_HEIGHT + Math.max(0, watched.length - 1) * ITEM_GAP + paddingY * 2
+            : 0;
+        const viewH = this._listViewHeight;
+        const contentH = Math.max(viewH, totalH);
+        const listUt = this.listRoot.getComponent(UITransform);
+        if (listUt) {
+            listUt.setContentSize(640, contentH);
+            listUt.setAnchorPoint(0.5, 1);
+        }
+        this.listRoot.setPosition(0, viewH * 0.5, 0);
+
+        if (watched.length === 0) {
+            this.listScrollView?.scrollToTop(0);
+            return;
+        }
+
+        let layout = this.listRoot.getComponent(Layout);
+        if (!layout) layout = this.listRoot.addComponent(Layout);
+        layout.type = Layout.Type.VERTICAL;
+        layout.resizeMode = Layout.ResizeMode.NONE;
+        layout.spacingY = ITEM_GAP;
+        layout.paddingTop = paddingY;
+        layout.paddingBottom = paddingY;
+        layout.horizontalDirection = Layout.HorizontalDirection.LEFT_TO_RIGHT;
+        layout.verticalDirection = Layout.VerticalDirection.TOP_TO_BOTTOM;
+        layout.affectedByScale = true;
 
         for (let i = 0; i < watched.length; i++) {
-            const entry = watched[i];
-            const y = startY - i * (ITEM_HEIGHT + ITEM_GAP);
-            this.createListItem(this.listRoot, entry, itemWidth, ITEM_HEIGHT, 0, y);
+            this.createListItem(this.listRoot, watched[i], itemWidth, ITEM_HEIGHT, 0, 0);
         }
+        layout.updateLayout();
+        this.listScrollView?.scrollToTop(0);
     }
 
     private createListItem(
@@ -211,6 +244,58 @@ export class RewardVideoGalleryPanel extends BasePanel {
             RewardVideoPlayer.Instance = found;
         }
         return found;
+    }
+
+    /** Bọc ListRoot bằng Mask + ScrollView nếu prefab chưa có. */
+    private ensureScrollView(): void {
+        if (!this.listRoot?.isValid) return;
+
+        const existing = this.listScrollView
+            || this.listRoot.getComponent(ScrollView)
+            || this.listRoot.parent?.getComponent(ScrollView)
+            || null;
+        if (existing?.isValid) {
+            this.listScrollView = existing;
+            if (!existing.content) existing.content = this.listRoot;
+            const viewUt = existing.node.getComponent(UITransform);
+            if (viewUt) this._listViewHeight = viewUt.contentSize.height || this._listViewHeight;
+            return;
+        }
+
+        const card = this.listRoot.parent;
+        if (!card?.isValid) return;
+
+        const listUt = this.listRoot.getComponent(UITransform);
+        const viewW = listUt?.contentSize.width || 640;
+        const viewH = listUt?.contentSize.height || 700;
+        this._listViewHeight = viewH;
+        const listPos = this.listRoot.position.clone();
+
+        const view = new Node('ClipScrollView');
+        view.layer = this.listRoot.layer;
+        view.setParent(card);
+        view.setPosition(listPos);
+        const viewUt = view.addComponent(UITransform);
+        viewUt.setContentSize(viewW, viewH);
+        viewUt.setAnchorPoint(0.5, 0.5);
+
+        const mask = view.addComponent(Mask);
+        mask.type = Mask.Type.GRAPHICS_RECT;
+
+        const scroll = view.addComponent(ScrollView);
+        scroll.horizontal = false;
+        scroll.vertical = true;
+        scroll.inertia = true;
+        scroll.elastic = true;
+        scroll.brake = 0.75;
+        scroll.cancelInnerEvents = true;
+        scroll.bounceDuration = 0.23;
+
+        this.listRoot.setParent(view);
+        if (listUt) listUt.setAnchorPoint(0.5, 1);
+        this.listRoot.setPosition(0, viewH * 0.5, 0);
+        scroll.content = this.listRoot;
+        this.listScrollView = scroll;
     }
 
     /** Prefab thiếu property / fallback: dựng shell UI tối thiểu. */
@@ -300,6 +385,7 @@ export class RewardVideoGalleryPanel extends BasePanel {
             lt.setContentSize(640, 700);
             this.listRoot = list;
         }
+        this.ensureScrollView();
 
         if (!this.closeButton) {
             const closeNode = new Node('BtnClose');

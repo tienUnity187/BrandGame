@@ -115,7 +115,7 @@ export class GameplayPanel extends BasePanel {
 
         if (this.levelLabel) this.levelLabel.string = `Level ${levelId}`;
         if (this.scoreLabel) this.scoreLabel.string = `${score}`;
-        if (this.starLabel) this.starLabel.string = `★ ${walletStars}`;
+        if (this.starLabel) this.starLabel.string = `${walletStars}`;
         if (this.timeLabel) this.timeLabel.string = this.formatTime(this._elapsedSeconds);
         this.updateOrderLabel();
         this.updateBoosterUI();
@@ -136,7 +136,7 @@ export class GameplayPanel extends BasePanel {
 
     private refreshWalletStarLabel(): void {
         if (this.starLabel) {
-            this.starLabel.string = `★ ${StarWallet.getInstance().getBalance()}`;
+            this.starLabel.string = `${StarWallet.getInstance().getBalance()}`;
         }
     }
 

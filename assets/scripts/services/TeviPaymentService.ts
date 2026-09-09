@@ -29,7 +29,7 @@ export interface PurchasePackOptions {
     onTeviDialog?: () => void;
     /** Sau khi Tevi popup trả callback (ok hoặc hủy/lỗi). */
     onTeviDialogClosed?: (ok: boolean) => void;
-    /** Tevi xác nhận xong, bắt đầu poll webhook — hiện thông báo chờ sao. */
+    /** Tevi xác nhận xong — cộng sao ngay. */
     onAwaitingStars?: () => void;
     /** Bước 6/6 — sao đã cộng vào ví. */
     onSuccess?: (stars: number, balance: number) => void;
@@ -78,17 +78,17 @@ interface TopUpSignatureResponse {
  * 1) Xin user_app_token (payment.write)
  * 2) POST Worker top-up-signature → deposit_token + order_id
  * 3) TeviJS.topup({ deposit_token, amount })
- * 4) Poll Worker /api/top-up-status — đợi webhook user_topup (paid)
- * 5) Cộng ★ local khi status=paid
+ * 4) TeviJS.topup call=ok = Tevi đã trừ Star — cộng ★ ngay (không chờ KV/webhook ~60s)
+ * 5) Báo Worker sdk-report để mark paid cùng colo user; webhook chỉ là backup claim
  */
 export class TeviPaymentService {
     private static _instance: TeviPaymentService | null = null;
     private _busy = false;
     private _claimRunning = false;
 
-    /** Poll webhook tối đa ~90s (45 × 2s). */
-    private static readonly WEBHOOK_POLL_ATTEMPTS = 45;
-    private static readonly WEBHOOK_POLL_INTERVAL_MS = 2000;
+    /** Xác nhận nhanh sau SDK OK — Worker cùng colo sẽ mark paid ngay. */
+    private static readonly FAST_CONFIRM_ATTEMPTS = 4;
+    private static readonly FAST_CONFIRM_INTERVAL_MS = 250;
     /** Retry claim khi tắt app giữa chừng — webhook có thể tới sau khi mở lại. */
     private static readonly CLAIM_RETRY_INTERVAL_MS = 15000;
     private static readonly CLAIM_RETRY_MAX = 20;
@@ -101,6 +101,12 @@ export class TeviPaymentService {
             TeviPaymentService._instance = new TeviPaymentService();
         }
         return TeviPaymentService._instance;
+    }
+
+    /** Editor/test: trần thời gian xác nhận sau SDK — phải << 60s KV lag. */
+    public static getPostSdkConfirmBudgetMs(): number {
+        return TeviPaymentService.FAST_CONFIRM_ATTEMPTS
+            * TeviPaymentService.FAST_CONFIRM_INTERVAL_MS;
     }
 
     public getPacks(): readonly StarTopUpPack[] {
@@ -446,9 +452,9 @@ export class TeviPaymentService {
             report(`1/6 Tevi wallet balance=${teviBalance} need=${pack.amount}`);
             if (teviBalance < pack.amount) {
                 throw new Error(
-                    `Not enough Tevi Stars.\n`
-                    + `Your wallet: ${teviBalance} ★\n`
-                    + `This pack needs: ${pack.amount} ★\n\n`
+                    `Not enough coins.\n`
+                    + `Your wallet: ${teviBalance}\n`
+                    + `This pack needs: ${pack.amount}\n\n`
                     + `Top up your Tevi wallet first, then try again.`,
                 );
             }
@@ -477,11 +483,20 @@ export class TeviPaymentService {
                 createdAt: Date.now(),
                 confirmed: true,
             });
-            await this.reportSdkCallbackToWorker(userToken, orderId, sdkCallback, report);
+            const sdkReportedPaid = await this.reportSdkCallbackToWorker(
+                userToken,
+                orderId,
+                sdkCallback,
+                report,
+            );
 
-            report(`4/6 Waiting webhook user_topup (poll ${TEVI_TOP_UP_STATUS_URL})...`);
+            report(`4/6 TeviJS.topup OK — crediting now (no KV webhook wait)`);
             lifecycle.onAwaitingStars?.();
-            await this.waitForWebhookPaid(userToken, orderId, sdkCallback, report);
+            const confirmed = sdkReportedPaid
+                || await this.confirmPaidFast(userToken, orderId, report);
+            if (!confirmed) {
+                report('5/6 Worker status still pending — credit from SDK (Tevi already charged)');
+            }
 
             const balance = this.creditPaidOrder(
                 orderId,
@@ -489,7 +504,8 @@ export class TeviPaymentService {
                 `topup:${pack.id}:${orderId}`,
             );
             void this.notifyWorkerClaim(userToken, orderId);
-            const message = `6/6 SUCCESS webhook paid → +${pack.stars} | Total ${balance} | order=${orderId}`;
+            const message = `6/6 SUCCESS → +${pack.stars} | Total ${balance} | order=${orderId}`
+                + (confirmed ? ' | worker=paid' : ' | worker=sdk');
             report(message);
             lifecycle.onSuccess?.(pack.stars, balance);
             return { ok: true, message, balance };
@@ -504,8 +520,7 @@ export class TeviPaymentService {
     }
 
     /**
-     * Nạp giả lập Editor: vẫn in đủ bước GỬI → CHỜ → NHẬN trên label
-     * (giả lập delay API, không gọi Tevi thật).
+     * Nạp giả lập Editor — cùng logic mới: SDK OK → cộng ngay, không poll webhook 90s.
      */
     public async mockGrantPack(
         packId: string,
@@ -524,20 +539,58 @@ export class TeviPaymentService {
             return { ok: false, message, balance: StarWallet.getInstance().getBalance() };
         }
 
-        report(`[Mock] 1/4 Preparing pack ${pack.label}`);
-        await this.delay(250);
+        const started = Date.now();
+        const budgetMs = TeviPaymentService.getPostSdkConfirmBudgetMs();
+        report(`[Mock] 1/6 Editor flow=credit-on-sdk-ok confirmBudget=${budgetMs}ms (old poll=90000ms)`);
+        await this.delay(120);
 
-        report(`[Mock] 2/4 SEND fake top-up-signature { amount: ${pack.amount} } ... waiting`);
-        await this.delay(450);
+        report(`[Mock] 2/6 fake top-up-signature amount=${pack.amount} stars=${pack.stars}`);
+        await this.delay(160);
 
-        report(`[Mock] 3/4 RECEIVED fake deposit_token=mock-token-${pack.id} | simulating TeviJS.topup`);
-        await this.delay(350);
+        report(`[Mock] 3/6 TeviJS.topup callback OK (call=ok)`);
+        lifecycle.onTeviDialog?.();
+        await this.delay(180);
+        lifecycle.onTeviDialogClosed?.(true);
 
-        const balance = StarWallet.getInstance().addStars(pack.stars, `mock:${pack.id}`);
-        const message = `[Mock] 4/4 SUCCESS → +${pack.stars} | Total ${balance} (Tevi not called)`;
+        report(`[Mock] 4/6 TeviJS.topup OK — crediting now (no KV webhook wait)`);
+        lifecycle.onAwaitingStars?.();
+        await this.delay(80);
+
+        const orderId = `mock-${pack.id}-${Date.now()}`;
+        const balance = this.creditPaidOrder(orderId, pack.stars, `mock:${pack.id}:${orderId}`);
+        const elapsed = Date.now() - started;
+        const message =
+            `[Mock] 6/6 SUCCESS → +${pack.stars} | Total ${balance}`
+            + ` | elapsed=${elapsed}ms | must be << 60000`;
         report(message);
         lifecycle.onSuccess?.(pack.stars, balance);
         return { ok: true, message, balance };
+    }
+
+    /**
+     * Editor/unit test: cộng sao như sau TeviJS.topup OK — không gọi Worker/webhook.
+     */
+    public debugCreditOnSdkOk(packId: string): {
+        ok: boolean;
+        stars: number;
+        balance: number;
+        confirmBudgetMs: number;
+        orderId: string;
+    } {
+        const pack = this.getPackById(packId);
+        const confirmBudgetMs = TeviPaymentService.getPostSdkConfirmBudgetMs();
+        if (!pack) {
+            return {
+                ok: false,
+                stars: 0,
+                balance: StarWallet.getInstance().getBalance(),
+                confirmBudgetMs,
+                orderId: '',
+            };
+        }
+        const orderId = `editor-sdk-${pack.id}-${Date.now()}`;
+        const balance = this.creditPaidOrder(orderId, pack.stars, `editor-sdk:${pack.id}`);
+        return { ok: true, stars: pack.stars, balance, confirmBudgetMs, orderId };
     }
 
     private resolvePurchaseOptions(
@@ -597,7 +650,7 @@ export class TeviPaymentService {
 
         const rawAmount = payload.data?.amount ?? payload.amount ?? 0;
         const balance = Math.max(0, Math.floor(Number(rawAmount) || 0));
-        report?.(`Tevi wallet: ${balance} ★`);
+        report?.(`Tevi wallet: ${balance} coins`);
         return balance;
     }
 
@@ -698,98 +751,39 @@ export class TeviPaymentService {
         return { depositToken, channelId, orderId };
     }
 
-    /** Poll Worker cho đến khi webhook user_topup đánh dấu paid. */
-    private async waitForWebhookPaid(
+    /**
+     * Sau SDK OK: poll ngắn để lấy Worker paid (sdk-report cùng colo).
+     * Không timeout — Tevi đã trừ Star, game vẫn cộng nếu Worker chưa kịp.
+     */
+    private async confirmPaidFast(
         userToken: string,
         orderId: string,
-        sdkCallback: Record<string, unknown>,
         report: PaymentStatusCallback,
-    ): Promise<void> {
-        let lastHint = '';
-        let lastStatus = '?';
-
-        for (let attempt = 1; attempt <= TeviPaymentService.WEBHOOK_POLL_ATTEMPTS; attempt++) {
-            const url = `${TEVI_TOP_UP_STATUS_URL}?order_id=${encodeURIComponent(orderId)}`;
-            let response: Response;
+    ): Promise<boolean> {
+        for (let attempt = 1; attempt <= TeviPaymentService.FAST_CONFIRM_ATTEMPTS; attempt++) {
             try {
-                response = await fetch(url, {
-                    method: 'GET',
-                    headers: {
-                        'Authorization': `Bearer ${userToken}`,
-                        'Accept': 'application/json',
-                    },
-                });
+                const payload = await this.fetchTopUpStatus(userToken, orderId);
+                const status = payload.status ?? '?';
+                report(
+                    `5/6 confirm ${attempt}/${TeviPaymentService.FAST_CONFIRM_ATTEMPTS} status=${status}`,
+                );
+                if (status === 'paid') return true;
+                if (status === 'failed') {
+                    TopUpPendingStore.getInstance().removePending(orderId);
+                    throw new Error(`Giao dịch failed (order ${orderId}).`);
+                }
             } catch (error) {
+                if (error instanceof Error && /failed \(order/i.test(error.message)) {
+                    throw error;
+                }
                 const message = error instanceof Error ? error.message : `${error}`;
-                throw new Error(`Poll top-up-status failed: ${message}`);
+                report(`5/6 confirm skip: ${message}`);
             }
-
-            let payload: {
-                success?: boolean;
-                status?: string;
-                reason?: string;
-                hint?: string;
-                message?: string;
-                stars?: number;
-                exchange_id?: string;
-                pending_seconds?: number;
-                webhook_note?: string | null;
-                sdk_callback?: Record<string, unknown> | null;
-                worker_version?: string;
-            } = {};
-            try {
-                payload = await response.json();
-            } catch {
-                throw new Error(`top-up-status HTTP ${response.status}, not JSON`);
+            if (attempt < TeviPaymentService.FAST_CONFIRM_ATTEMPTS) {
+                await this.delay(TeviPaymentService.FAST_CONFIRM_INTERVAL_MS);
             }
-
-            lastStatus = payload.status ?? '?';
-            lastHint = payload.reason || payload.hint || payload.message || '';
-
-            report(
-                `5/6 poll ${attempt}/${TeviPaymentService.WEBHOOK_POLL_ATTEMPTS}`
-                + ` status=${lastStatus} wait=${payload.pending_seconds ?? '?'}s`,
-            );
-            if (lastHint) {
-                report(`5/6 WHY: ${lastHint}`);
-            }
-            if (payload.webhook_note) {
-                report(`5/6 webhook_note: ${payload.webhook_note}`);
-            }
-
-            if (payload.status === 'paid') {
-                report(`5/6 webhook user_topup confirmed order=${orderId}`
-                    + (payload.exchange_id ? ` exchange=${payload.exchange_id}` : ''));
-                return;
-            }
-
-            if (payload.status === 'failed') {
-                TopUpPendingStore.getInstance().removePending(orderId);
-                throw new Error(
-                    `Giao dịch failed (order ${orderId}). ${lastHint || 'Webhook báo thất bại.'}`,
-                );
-            }
-
-            if (payload.status === 'unknown') {
-                throw new Error(
-                    `Order ${orderId} không có trong Worker KV. `
-                    + `${lastHint || 'Bind TOPUP_ORDERS và deploy Worker v1.0.12.'}`,
-                );
-            }
-
-            await this.delay(TeviPaymentService.WEBHOOK_POLL_INTERVAL_MS);
         }
-
-        const sdkSummary = this.formatSdkCallbackSummary(sdkCallback);
-        throw new Error(
-            `TIMEOUT 5/6 — webhook user_topup chưa paid (order ${orderId}). `
-            + `Last status=${lastStatus}. ${lastHint || ''} `
-            + `SDK: ${sdkSummary}. `
-            + 'Nguyên nhân thường gặp: (1) Tevi chưa gửi webhook — kiểm Portal Topup + Worker Logs; '
-            + '(2) TEVI_WEBHOOK_SECRET sai → webhook 401; '
-            + '(3) exchange_id webhook không khớp order_id; '
-            + '(4) thanh toán Tevi thất bại dù popup OK.',
-        );
+        return false;
     }
 
     private creditPaidOrder(orderId: string, stars: number, reason: string): number {
@@ -880,7 +874,7 @@ export class TeviPaymentService {
         orderId: string,
         sdkCallback: Record<string, unknown>,
         report: PaymentStatusCallback,
-    ): Promise<void> {
+    ): Promise<boolean> {
         report(`3/6 SDK callback: ${this.formatSdkCallbackSummary(sdkCallback)}`);
         report(`3/6 SDK raw: ${this.truncateJson(sdkCallback, 220)}`);
 
@@ -894,16 +888,26 @@ export class TeviPaymentService {
                 },
                 body: JSON.stringify({ order_id: orderId, sdk_callback: sdkCallback }),
             });
-            const payload = await response.json().catch(() => ({})) as { hint?: string; message?: string };
+            const payload = await response.json().catch(() => ({})) as {
+                hint?: string;
+                message?: string;
+                status?: string;
+                paid_via?: string;
+            };
             if (payload.hint) {
                 report(`3/6 Worker hint: ${payload.hint}`);
             } else if (!response.ok) {
                 report(`3/6 Worker sdk-report HTTP ${response.status} ${payload.message || ''}`);
             }
+            if (payload.status === 'paid') {
+                report(`3/6 Worker marked paid via ${payload.paid_via || 'sdk'}`);
+                return true;
+            }
         } catch (error) {
             const message = error instanceof Error ? error.message : `${error}`;
             report(`3/6 Worker sdk-report skip: ${message}`);
         }
+        return false;
     }
 
     private truncateJson(obj: unknown, maxLen: number): string {

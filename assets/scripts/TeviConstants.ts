@@ -5,7 +5,7 @@ export const APP_ID = 'DQX81404';
 export const ENV = 'SANDBOX';
 
 /** Phiên bản cấu hình gửi sang Tevi container. */
-export const VERSION = '1.0.15';
+export const VERSION = '1.0.16';
 
 /**
  * Bật bridge Tevi giả khi chạy Editor Preview hoặc Development Build.

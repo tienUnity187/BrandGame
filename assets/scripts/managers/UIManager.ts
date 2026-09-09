@@ -30,6 +30,12 @@ export class UIManager extends Component {
     private _loadingNode: Node | null = null;
     private _loadingLabel: Label | null = null;
 
+    /** Panel ít mở — destroy instance khi đóng, giữ prefab cache. */
+    private static readonly DESTROY_ON_CLOSE = new Set([
+        'LevelSelectPanel',
+        'RewardVideoGalleryPanel',
+    ]);
+
     protected onLoad(): void {
         if (UIManager.Instance) { this.destroy(); return; }
         UIManager.Instance = this;
@@ -41,14 +47,11 @@ export class UIManager extends Component {
         this.prepareLoadingOverlay();
     }
 
+    /** Chỉ cache prefab — không instantiate cây node. */
     public async preloadPanel(panelName: string): Promise<void> {
-        if (this._panelMap.has(panelName)) return;
-        let prefab = this._prefabCache.get(panelName) || null;
-        if (!prefab) {
-            prefab = await SkinManager.getInstance().getPanelPrefab(panelName);
-            if (prefab) this._prefabCache.set(panelName, prefab);
-        }
-        if (prefab) this.createPanelInstance(panelName, prefab, false);
+        if (this._panelMap.has(panelName) || this._prefabCache.has(panelName)) return;
+        const prefab = await SkinManager.getInstance().getPanelPrefab(panelName);
+        if (prefab) this._prefabCache.set(panelName, prefab);
     }
 
     public async preloadPanels(panelNames: string[]): Promise<void> {
@@ -124,12 +127,33 @@ export class UIManager extends Component {
         const panel = this._panelMap.get(panelName);
         if (panel) {
             panel.hide();
-            // Có thể destroy hoặc chỉ hide tùy chiến lược
+            if (UIManager.DESTROY_ON_CLOSE.has(panelName)) {
+                this.destroyPanelInstance(panelName);
+                return;
+            }
         }
 
         const index = this._panelStack.indexOf(panelName);
         if (index !== -1) {
             this._panelStack.splice(index, 1);
+        }
+    }
+
+    public destroyPanelInstance(panelName: string): void {
+        const panel = this._panelMap.get(panelName);
+        this._panelMap.delete(panelName);
+        const index = this._panelStack.indexOf(panelName);
+        if (index !== -1) {
+            this._panelStack.splice(index, 1);
+        }
+        if (panel?.node?.isValid) {
+            panel.node.destroy();
+        }
+    }
+
+    public destroyClosedPanels(panelNames: string[]): void {
+        for (const panelName of panelNames) {
+            this.destroyPanelInstance(panelName);
         }
     }
 
@@ -143,7 +167,10 @@ export class UIManager extends Component {
 
     /** Đóng tất cả panels */
     public closeAllPanels(): void {
-        this._panelMap.forEach(panel => panel.hide());
+        const names = Array.from(this._panelMap.keys());
+        for (const name of names) {
+            this.closePanel(name);
+        }
         this._panelStack = [];
     }
 

@@ -32,13 +32,18 @@ export interface ITopUpSuccessInfo {
     fromPreviousPurchase?: boolean;
 }
 
+export interface IWalletShortageInfo {
+    wallet: number;
+    need: number;
+}
+
 const { ccclass, property } = _decorator;
 
-const SAMPLE_TITLE = 'Insufficient Tevi Stars';
+const SAMPLE_TITLE = 'Not enough coins';
 const SAMPLE_BODY =
-    'Not enough Tevi Stars.\n\n'
-    + 'Your wallet: 0 ★\n'
-    + 'This pack needs: 100 ★\n\n'
+    'Not enough coins.\n\n'
+    + 'Your wallet: 0\n'
+    + 'This pack needs: 100\n\n'
     + 'Top up your Tevi wallet first, then try again.';
 
 /**
@@ -108,6 +113,7 @@ export class TopUpResultPopupPanel extends Component {
             topUpBarSource?: Node | null;
             onTopUpClicked?: () => void;
             boosterShortage?: IBoosterShortageInfo;
+            walletShortage?: IWalletShortageInfo;
             topUpSuccess?: ITopUpSuccessInfo;
         },
     ): void {
@@ -116,19 +122,27 @@ export class TopUpResultPopupPanel extends Component {
         this._onTopUpClicked = options?.onTopUpClicked ?? null;
         if (this.titleLabel) this.titleLabel.string = title;
         const shortage = options?.boosterShortage;
+        const walletShortage = options?.walletShortage;
         const success = options?.topUpSuccess;
-        const useCoinMessage = !!(shortage || success);
+        const useCoinMessage = !!(shortage || walletShortage || success);
         if (this.bodyLabel) {
             this.bodyLabel.string = useCoinMessage ? '' : message;
         }
         this.ensureLabelWrap(this.titleLabel, false);
         this.ensureLabelWrap(this.bodyLabel, true);
-        const showTopUpBar = !!options?.topUpBarSource?.isValid;
+        const showTopUpBar = !!options?.topUpBarSource?.isValid && !walletShortage;
         this.setTopUpBarVisible(showTopUpBar, options?.topUpBarSource ?? null);
         if (!showTopUpBar && !useCoinMessage && this.autoFitBody) {
             this.centerBodyInPanel(message);
         }
-        this.setCoinMessageVisible(useCoinMessage, shortage, success, title, options?.topUpBarSource ?? null);
+        this.setCoinMessageVisible(
+            useCoinMessage,
+            shortage,
+            walletShortage,
+            success,
+            title,
+            options?.topUpBarSource ?? null,
+        );
         this.mountOnCanvas();
         AudioManager.getInstance()?.bindButtonSounds(this.node);
         this.node.active = true;
@@ -141,7 +155,7 @@ export class TopUpResultPopupPanel extends Component {
         this._onClose = null;
         this._onTopUpClicked = null;
         this.setTopUpBarVisible(false, null);
-        this.setCoinMessageVisible(false, null, null, '', null);
+        this.setCoinMessageVisible(false, null, null, null, '', null);
     }
 
     /** Editor preview — chỉ gán text mẫu, giữ layout prefab. */
@@ -237,6 +251,7 @@ export class TopUpResultPopupPanel extends Component {
     private setCoinMessageVisible(
         visible: boolean,
         shortage: IBoosterShortageInfo | null | undefined,
+        walletShortage: IWalletShortageInfo | null | undefined,
         success: ITopUpSuccessInfo | null | undefined,
         title: string,
         source: Node | null,
@@ -257,8 +272,10 @@ export class TopUpResultPopupPanel extends Component {
             this.fillSuccessMessage(title, success);
         } else if (shortage) {
             this.fillShortageMessage(shortage);
+        } else if (walletShortage) {
+            this.fillWalletShortageMessage(walletShortage);
         }
-        this.placeCoinMessage(isSuccess);
+        this.placeCoinMessage(isSuccess || !!walletShortage);
         if (this._coinMessageRoot) this._coinMessageRoot.active = true;
         this.resolveMoneySprite(source);
     }
@@ -404,6 +421,24 @@ export class TopUpResultPopupPanel extends Component {
         this.fillCoinRow(
             root.getChildByName('BalanceRow'),
             `Your balance: ${shortage.balance}`,
+            '',
+        );
+        this.refreshCoinMessageLayout();
+    }
+
+    private fillWalletShortageMessage(shortage: IWalletShortageInfo): void {
+        const root = this._coinMessageRoot;
+        if (!root?.isValid) return;
+        const titleRow = root.getChildByName('TitleRow');
+        if (titleRow) titleRow.active = false;
+        this.fillCoinRow(
+            root.getChildByName('NeedRow'),
+            `Your wallet: ${shortage.wallet}`,
+            '',
+        );
+        this.fillCoinRow(
+            root.getChildByName('BalanceRow'),
+            `This pack needs: ${shortage.need}`,
             '',
         );
         this.refreshCoinMessageLayout();
