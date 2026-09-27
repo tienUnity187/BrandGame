@@ -4,6 +4,7 @@ import { EventBus } from './core/EventBus';
 import { GameEvent } from './enums/GameEvent';
 import {
     APP_ID,
+    ENABLE_DEBUG_LOGS,
     ENABLE_TEVI_DEVELOPER_MOCK,
     ENV,
     STORAGE_KEYS,
@@ -54,6 +55,10 @@ export class TeviLoginManager extends Component {
             return;
         }
         TeviLoginManager.Instance = this;
+        if (!ENABLE_DEBUG_LOGS) {
+            if (this.statusLabel?.node) this.statusLabel.node.active = false;
+            if (this.userInfoLabel?.node) this.userInfoLabel.node.active = false;
+        }
     }
 
     protected start(): void {
@@ -88,10 +93,11 @@ export class TeviLoginManager extends Component {
         }
 
         const pageOrigin = typeof window !== 'undefined' ? (window.location?.origin || '') : '';
-        console.log('[TeviLogin] page origin:', pageOrigin);
-        // Hiện Origin trên userInfoLabel để dễ chụp màn hình điện thoại.
-        if (pageOrigin) {
-            this.setUserInfo(`ORIGIN = ${pageOrigin}`);
+        if (ENABLE_DEBUG_LOGS) {
+            console.log('[TeviLogin] page origin:', pageOrigin);
+            if (pageOrigin) {
+                this.setUserInfo(`ORIGIN = ${pageOrigin}`);
+            }
         }
 
         const teviJS = window.TeviJS as any;
@@ -103,7 +109,9 @@ export class TeviLoginManager extends Component {
             },
             version: VERSION,
         };
-        console.log('[TeviLogin] loadConfig payload:', loadConfigPayload);
+        if (ENABLE_DEBUG_LOGS) {
+            console.log('[TeviLogin] loadConfig payload:', loadConfigPayload);
+        }
 
         if (!this.getUserToken()) {
             this.setStatus(`loadConfig app=${APP_ID} env=${ENV} v${VERSION}`);
@@ -206,7 +214,9 @@ export class TeviLoginManager extends Component {
         }
         this.setUserInfo('');
         this.setStatus(`Đã xóa token (${reason})`);
-        console.log('[TeviLogin] Cleared session:', reason);
+        if (ENABLE_DEBUG_LOGS) {
+            console.log('[TeviLogin] Cleared session:', reason);
+        }
     }
 
     /** Có thể nối hàm này với Button để người dùng thử đăng nhập lại. */
@@ -226,7 +236,9 @@ export class TeviLoginManager extends Component {
         this._isRequestingUserInfo = true;
         const usePopup = forcePopup || this.showLoginPopup;
 
-        console.log('[TeviLogin] getUserInfo request:', { app_id: APP_ID, is_popup: usePopup });
+        if (ENABLE_DEBUG_LOGS) {
+            console.log('[TeviLogin] getUserInfo request:', { app_id: APP_ID, is_popup: usePopup });
+        }
 
         try {
             teviJS.getUserInfo(
@@ -385,7 +397,9 @@ export class TeviLoginManager extends Component {
     }
 
     private onLoadConfigFinished(response?: TeviBridgeResponse): void {
-        console.log('[TeviLogin] loadConfig response:', response);
+        if (ENABLE_DEBUG_LOGS) {
+            console.log('[TeviLogin] loadConfig response:', response);
+        }
 
         if (response && this.hasErrorCode(response.error_code)) {
             // loadConfig lỗi vẫn thử getUserInfo vì một số bản native trả callback chung.
@@ -404,8 +418,10 @@ export class TeviLoginManager extends Component {
     private handleUserInfoResponse(response: TeviGetUserInfoResponse): void {
         this._isRequestingUserInfo = false;
         const normalized = this.normalizeBridgePayload(response);
-        console.log('[TeviLogin] getUserInfo raw:', response);
-        console.log('[TeviLogin] getUserInfo normalized:', normalized);
+        if (ENABLE_DEBUG_LOGS) {
+            console.log('[TeviLogin] getUserInfo raw:', response);
+            console.log('[TeviLogin] getUserInfo normalized:', normalized);
+        }
 
         if (!normalized) {
             this.handleFailure('EMPTY_RESPONSE');
@@ -486,14 +502,16 @@ export class TeviLoginManager extends Component {
                 : `User ID: ${extracted.userId}`)
             + ` | JWT.app=${jwtApp || APP_ID}`,
         );
-        console.log('[TeviLogin] Đăng nhập thành công:', {
-            userId: extracted.userId,
-            userName: extracted.userName,
-            appId: APP_ID,
-            jwtApp,
-            match: true,
-            env: ENV,
-        });
+        if (ENABLE_DEBUG_LOGS) {
+            console.log('[TeviLogin] Đăng nhập thành công:', {
+                userId: extracted.userId,
+                userName: extracted.userName,
+                appId: APP_ID,
+                jwtApp,
+                match: true,
+                env: ENV,
+            });
+        }
         void this.tryClaimPendingTopUps();
     }
 
@@ -784,12 +802,14 @@ export class TeviLoginManager extends Component {
 
     /** Cho module khác (video, API…) ghi trạng thái debug tạm lên label. */
     public setDebugStatus(message: string): void {
+        if (!ENABLE_DEBUG_LOGS) return;
         this.setStatus(message);
         console.log('[TeviDebug]', message);
     }
 
     /** Hiện text debug trên userInfoLabel (dễ chụp màn hình hơn status dài). */
     public setDebugUserInfo(message: string): void {
+        if (!ENABLE_DEBUG_LOGS) return;
         this.setUserInfo(message);
         console.log('[TeviDebug][UserInfo]', message);
     }
@@ -804,12 +824,14 @@ export class TeviLoginManager extends Component {
     }
 
     private setStatus(message: string): void {
+        if (!ENABLE_DEBUG_LOGS) return;
         if (this.statusLabel) {
             this.statusLabel.string = `v${VERSION} | ${message}`;
         }
     }
 
     private setUserInfo(message: string): void {
+        if (!ENABLE_DEBUG_LOGS) return;
         if (this.userInfoLabel) {
             this.userInfoLabel.string = message;
         }

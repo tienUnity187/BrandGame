@@ -19,7 +19,7 @@ import {
 import { EDITOR, PREVIEW } from 'cc/env';
 import { EventBus } from '../core/EventBus';
 import { GameEvent } from '../enums/GameEvent';
-import { APP_ID, STAR_TOPUP_PACKS, VERSION } from '../TeviConstants';
+import { APP_ID, ENABLE_DEBUG_LOGS, STAR_TOPUP_PACKS, VERSION } from '../TeviConstants';
 import { StarWallet } from '../services/StarWallet';
 import { TeviPaymentService, PurchasePackOptions } from '../services/TeviPaymentService';
 import { TopUpPendingStore } from '../services/TopUpPendingStore';
@@ -170,6 +170,7 @@ export class StarWalletHud extends Component {
 
     /** Ghi log lên shop Status label + Tevi statusLabel (dùng từ payment/claim mọi lúc). */
     public static logStatus(message: string): void {
+        if (!ENABLE_DEBUG_LOGS) return;
         const line = `${message}`.trim();
         if (!line) return;
         if (StarWalletHud.Instance?.node?.isValid) {
@@ -222,6 +223,7 @@ export class StarWalletHud extends Component {
     }
 
     private setStatus(message: string): void {
+        if (!ENABLE_DEBUG_LOGS) return;
         const line = `${message}`.trim();
         if (line) {
             this._statusLines.push(line);
@@ -288,6 +290,9 @@ export class StarWalletHud extends Component {
                 || null;
         }
         this._statusLabel = this.statusLabel;
+        if (!ENABLE_DEBUG_LOGS && this._statusLabel?.node) {
+            this._statusLabel.node.active = false;
+        }
 
         if (this.closeShopButton?.node?.isValid) {
             this.closeShopButton.node.off(Button.EventType.CLICK, this.closeShop, this);
@@ -635,7 +640,9 @@ export class StarWalletHud extends Component {
         if (this._pendingBannerRoot) {
             this.mountPendingBannerOnCanvas();
             this._pendingBannerRoot.active = true;
-            console.log('[StarWalletHud] Pending banner shown:', message.replace(/\n/g, ' / '));
+            if (ENABLE_DEBUG_LOGS) {
+                console.log('[StarWalletHud] Pending banner shown:', message.replace(/\n/g, ' / '));
+            }
         }
     }
 
@@ -716,7 +723,9 @@ export class StarWalletHud extends Component {
                 node.setPosition(0, 0, 0);
                 node.layer = parent.layer;
                 node.active = false;
-                console.log('[StarWalletHud] Spawn TopUpResultPopupPanel từ prefab.');
+                if (ENABLE_DEBUG_LOGS) {
+                    console.log('[StarWalletHud] Spawn TopUpResultPopupPanel từ prefab.');
+                }
             }
             this.flushTopUpResultReady();
         });

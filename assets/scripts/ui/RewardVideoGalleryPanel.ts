@@ -212,10 +212,6 @@ export class RewardVideoGalleryPanel extends BasePanel {
     }
 
     private onClipClicked(entry: WatchedRewardVideo): void {
-        console.log('[RewardVideoGallery] Clip clicked', {
-            levelId: entry.levelId,
-            file: entry.file,
-        });
         TeviLoginManager.Instance?.setDebugStatus(
             `Clip replay Lv${entry.levelId} → ${entry.file}`,
         );
@@ -229,7 +225,6 @@ export class RewardVideoGalleryPanel extends BasePanel {
         this.close();
         // Defer 1 frame so gallery close does not hide the player layer underneath.
         this.scheduleOnce(() => {
-            console.log('[RewardVideoGallery] Starting replay', entry.file);
             player.mountOnVisibleRoot();
             player.playSecretVideo(entry.file, undefined, entry.levelId);
         }, 0);

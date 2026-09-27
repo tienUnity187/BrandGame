@@ -29,7 +29,6 @@ export class SaveManager {
         try {
             const safeId = SaveManager.clampLevelId(levelId);
             sys.localStorage.setItem(SaveManager.KEY, `${safeId}`);
-            console.log(`[SaveManager] Lưu level đang chơi: ${safeId}`);
         } catch (err) {
         }
     }

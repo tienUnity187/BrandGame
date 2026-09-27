@@ -13,6 +13,7 @@ import {
     TEVI_TOP_UP_UNCLAIMED_URL,
     TEVI_USER_BALANCE_URL,
     VERSION,
+    ENABLE_DEBUG_LOGS,
 } from '../TeviConstants';
 import { EventBus } from '../core/EventBus';
 import { GameEvent } from '../enums/GameEvent';
@@ -195,7 +196,9 @@ export class TeviPaymentService {
             } else if (hasConfirmedPending) {
                 StarWalletHud.logStatus('Claim: nothing to receive');
             }
-            console.log('[TeviPayment] claimPendingTopUps done', result);
+            if (ENABLE_DEBUG_LOGS) {
+                console.log('[TeviPayment] claimPendingTopUps done', result);
+            }
             if (result.totalStars > 0) {
                 this._claimRetryCount = 0;
             } else {
@@ -266,7 +269,9 @@ export class TeviPaymentService {
                     `Claim: Worker unclaimed=${unclaimed.length} order(s)`,
                 );
             }
-            console.log('[TeviPayment] unclaimed orders from Worker:', unclaimed);
+            if (ENABLE_DEBUG_LOGS) {
+                console.log('[TeviPayment] unclaimed orders from Worker:', unclaimed);
+            }
             for (const order of unclaimed) {
                 if (!order.order_id || store.isCredited(order.order_id)) continue;
                 const stars = Math.max(0, Math.floor(Number(order.stars) || 0));
@@ -291,7 +296,9 @@ export class TeviPaymentService {
         }
 
         StarWalletHud.logStatus(`Claim: processing ${candidates.size} order(s)...`);
-        console.log('[TeviPayment] claim candidates:', [...candidates.keys()]);
+        if (ENABLE_DEBUG_LOGS) {
+            console.log('[TeviPayment] claim candidates:', [...candidates.keys()]);
+        }
 
         const claimed: Array<{ orderId: string; stars: number }> = [];
         let totalStars = 0;
@@ -333,7 +340,9 @@ export class TeviPaymentService {
             totalStars += stars;
             void this.notifyWorkerClaim(userToken, orderId);
             StarWalletHud.logStatus(`Claim credited +${stars} order=${orderId}`);
-            console.log(`[TeviPayment] Claimed pending top-up ${orderId} → +${stars} (balance ${balance})`);
+            if (ENABLE_DEBUG_LOGS) {
+                console.log(`[TeviPayment] Claimed pending top-up ${orderId} → +${stars} (balance ${balance})`);
+            }
         }
 
         if (totalStars > 0) {
@@ -369,6 +378,7 @@ export class TeviPaymentService {
     ): Promise<{ ok: boolean; message: string; balance: number }> {
         const lifecycle = this.resolvePurchaseOptions(options);
         const report = (msg: string) => {
+            if (!ENABLE_DEBUG_LOGS) return;
             lifecycle.onStatus?.(msg);
             console.log('[TeviPayment]', msg);
         };
@@ -528,6 +538,7 @@ export class TeviPaymentService {
     ): Promise<{ ok: boolean; message: string; balance: number }> {
         const lifecycle = this.resolvePurchaseOptions(options);
         const report = (msg: string) => {
+            if (!ENABLE_DEBUG_LOGS) return;
             lifecycle.onStatus?.(msg);
             console.log('[TeviPayment][Mock]', msg);
         };
@@ -699,7 +710,9 @@ export class TeviPaymentService {
             throw new Error(`Worker HTTP ${response.status}, body is not JSON.`);
         }
 
-        console.log('[TeviPayment] proxy top-up-signature FULL:', payload);
+        if (ENABLE_DEBUG_LOGS) {
+            console.log('[TeviPayment] proxy top-up-signature FULL:', payload);
+        }
         report(
             `Payload success=${payload.success} error_code=${payload.error_code ?? '-'}`
             + ` order_id=${payload.order_id || payload.debug?.order_id || '-'}`,
@@ -1011,7 +1024,9 @@ export class TeviPaymentService {
                 window.TeviJS.topup(
                     options,
                     (response) => {
-                        console.log('[TeviPayment] topup callback:', response);
+                        if (ENABLE_DEBUG_LOGS) {
+                            console.log('[TeviPayment] topup callback:', response);
+                        }
                         const normalized = (response && typeof response === 'object')
                             ? response as Record<string, unknown>
                             : { raw: response };

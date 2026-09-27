@@ -19,6 +19,8 @@ import { TeviLoginManager } from '../TeviLoginManager';
 import {
     getRewardVideoFileName,
     isRewardVideoLevel,
+    debugLog,
+    ENABLE_DEBUG_LOGS,
     logRewardVideoFilePlan,
     REWARD_VIDEO_TOKEN_URL,
     REWARD_VIDEO_UNLOCK_LEVELS,
@@ -201,7 +203,7 @@ export class GameManager extends Component {
         if (this._currentState !== GameState.GAMEPLAY) return;
         if (key === BOOSTER_CHEAT_KEY_CODE) {
             const enabled = BoosterManager.getInstance()?.toggleTestBoosterCheat() ?? false;
-            console.log(`[Cheat] HINT/UNDO x99: ${enabled ? 'ON' : 'OFF'}`);
+            debugLog(`[Cheat] HINT/UNDO x99: ${enabled ? 'ON' : 'OFF'}`);
         } else if (key >= KeyCode.DIGIT_1 && key <= KeyCode.DIGIT_9) {
             const levelId = key - KeyCode.DIGIT_1 + 1;
             this.startLevel(levelId);
@@ -239,7 +241,7 @@ export class GameManager extends Component {
         }
 
         currentLevelId = LevelManager.getInstance().getCurrentLevelId() || currentLevelId;
-        console.log(`[Cheat] T → Win level hiện tại: ${currentLevelId}`);
+        debugLog(`[Cheat] T → Win level hiện tại: ${currentLevelId}`);
         setTimeout(() => {
             LevelManager.getInstance().completeLevel(false);
         }, 100);
@@ -308,7 +310,7 @@ export class GameManager extends Component {
     private playRewardVideoIfNeeded(levelId: number): void {
         const isRewardLevel = isRewardVideoLevel(levelId);
         const videoFile = isRewardLevel ? getRewardVideoFileName(levelId) : null;
-        console.log('[RewardVideo][LevelComplete]', {
+        debugLog('[RewardVideo][LevelComplete]', {
             levelId,
             unlockLevels: REWARD_VIDEO_UNLOCK_LEVELS,
             isRewardLevel,
@@ -323,15 +325,13 @@ export class GameManager extends Component {
             TeviLoginManager.Instance?.setDebugStatus(
                 `Level ${levelId} xong → xin video ${videoFile}...`,
             );
-            console.log(
-                `[RewardVideo][LevelComplete] OK → playSecretVideo("${videoFile}")`,
-            );
+            debugLog(`[RewardVideo][LevelComplete] OK → playSecretVideo("${videoFile}")`);
             RewardVideoPlayer.Instance?.playSecretVideo(videoFile, () => {
                 TeviLoginManager.Instance?.setDebugStatus('Đã đóng video (xem xong/X), tiếp tục game.');
-                console.log('[RewardVideo] Đã đóng video, tiếp tục game.');
+                debugLog('[RewardVideo] Đã đóng video, tiếp tục game.');
             }, levelId);
         } else {
-            console.log(
+            debugLog(
                 `[RewardVideo][LevelComplete] Skip video (level ${levelId} không nằm trong ${REWARD_VIDEO_UNLOCK_LEVELS.join('/')})`,
             );
         }
@@ -390,15 +390,16 @@ export class GameManager extends Component {
         this.ensureRewardVideoPlayer();
         this.ensureStarWalletHud();
         this.ensureNoticePopupPanel();
-        // Editor: in sẵn bảng map level→file để xác nhận wiring đúng (không cần máy thật).
-        logRewardVideoFilePlan('[RewardVideo][Boot]');
-        console.log('[RewardVideo][Boot] Token endpoint =', REWARD_VIDEO_TOKEN_URL);
-        console.log(
-            '[RewardVideo][Boot] Unlock tại level',
-            REWARD_VIDEO_UNLOCK_LEVELS.join(', '),
-            '. Cheat Editor: phím T = thắng level hiện tại.',
-        );
-        console.log('[Save] Level đã lưu khi mở game =', this.getSavedLevelId());
+        if (ENABLE_DEBUG_LOGS) {
+            logRewardVideoFilePlan('[RewardVideo][Boot]');
+            debugLog('[RewardVideo][Boot] Token endpoint =', REWARD_VIDEO_TOKEN_URL);
+            debugLog(
+                '[RewardVideo][Boot] Unlock tại level',
+                REWARD_VIDEO_UNLOCK_LEVELS.join(', '),
+                '. Cheat Editor: phím T = thắng level hiện tại.',
+            );
+            debugLog('[Save] Level đã lưu khi mở game =', this.getSavedLevelId());
+        }
 
         this.setState(GameState.MAIN_MENU);
     }
@@ -633,7 +634,7 @@ export class GameManager extends Component {
                 if (!this.clipsButtonLabel) {
                     this.clipsButtonLabel = found.node.getComponentInChildren(Label);
                 }
-                console.log('[RewardVideo] clipsButton resolve bằng tên BtnClips');
+                debugLog('[RewardVideo] clipsButton resolve bằng tên BtnClips');
             }
         }
 
@@ -645,7 +646,7 @@ export class GameManager extends Component {
         this.raiseClipsButtonAboveOverlays();
         this.clipsButton.node.off(Button.EventType.CLICK, this.onClipsButtonClicked, this);
         this.clipsButton.node.on(Button.EventType.CLICK, this.onClipsButtonClicked, this);
-        console.log('[RewardVideo] Đã bind CLICK cho BtnClips');
+        debugLog('[RewardVideo] Đã bind CLICK cho BtnClips');
     }
 
     /** Đưa BtnClips ra Canvas (sau Status) để không bị label debug chặn click. */
@@ -673,7 +674,7 @@ export class GameManager extends Component {
     }
 
     private async onClipsButtonClicked(): Promise<void> {
-        console.log('[RewardVideo] Click Clip → open RewardVideoGalleryPanel');
+        debugLog('[RewardVideo] Click Clip → open RewardVideoGalleryPanel');
         await this.waitForInitialization();
         this.ensureRewardVideoPlayer();
         RewardVideoPlayer.Instance?.mountOnVisibleRoot();
@@ -687,7 +688,7 @@ export class GameManager extends Component {
         }
         // PopupLayer nằm trong GameScreen — khi đang Home thì GameScreen inactive → panel "mở" nhưng không thấy.
         this.mountPanelOnHomeVisibleRoot(panel.node);
-        console.log('[RewardVideo] Đã mở gallery clip (prefab) trên Canvas/Home root.');
+        debugLog('[RewardVideo] Đã mở gallery clip (prefab) trên Canvas/Home root.');
     }
 
     /**
@@ -732,7 +733,7 @@ export class GameManager extends Component {
         panel.initialize(UIManager.getInstance());
         panel.show();
         this.mountPanelOnHomeVisibleRoot(panel.node);
-        console.log('[RewardVideo] Đã mở gallery clip (fallback runtime).');
+        debugLog('[RewardVideo] Đã mở gallery clip (fallback runtime).');
     }
 
     private refreshClipsButtonLabel(): void {
@@ -794,7 +795,7 @@ export class GameManager extends Component {
     private getSavedLevelId(): number {
         const savedLevel = SaveManager.getInstance().getCurrentLevel();
         const levelId = savedLevel > 0 ? savedLevel : 1;
-        console.log('[Save] getSavedLevelId →', levelId);
+        debugLog('[Save] getSavedLevelId →', levelId);
         return levelId;
     }
 
@@ -977,7 +978,7 @@ export class GameManager extends Component {
             node.layer = parent.layer;
             node.active = false;
             AudioManager.getInstance()?.bindButtonSounds(node);
-            console.log('[GameManager] Đã spawn NoticePopupPanel từ prefab — mở prefab/scene để chỉnh layout.');
+            debugLog('[GameManager] Đã spawn NoticePopupPanel từ prefab — mở prefab/scene để chỉnh layout.');
         });
     }
 

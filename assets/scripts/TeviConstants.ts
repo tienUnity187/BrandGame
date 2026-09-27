@@ -1,17 +1,25 @@
-/** App ID Sandbox do Tevi cấp cho Mini App. */
-export const APP_ID = 'DQX81404';
+/** App ID Production do Tevi cấp cho Mini App. */
+export const APP_ID = 'EMO78171';
 
 /** Môi trường chạy hiện tại của Mini App. */
-export const ENV = 'SANDBOX';
+export const ENV = 'PRODUCTION';
 
 /** Phiên bản cấu hình gửi sang Tevi container. */
-export const VERSION = '1.0.16';
+export const VERSION = '1.0.17';
 
 /**
  * Bật bridge Tevi giả khi chạy Editor Preview hoặc Development Build.
  * Phải đặt về false khi không còn cần kiểm thử.
  */
 export const ENABLE_TEVI_DEVELOPER_MOCK = false;
+
+/** Label debug + console verbose (JWT, poll, Origin, URL video). Tắt khi lên Production. */
+export const ENABLE_DEBUG_LOGS = false;
+
+export function debugLog(...args: unknown[]): void {
+    if (!ENABLE_DEBUG_LOGS) return;
+    console.log(...args);
+}
 
 /** Endpoint Worker cấp URL video thưởng có chữ ký và thời hạn ngắn. */
 export const REWARD_VIDEO_TOKEN_URL =
@@ -49,21 +57,23 @@ export function logRewardVideoFilePlan(tag: string = '[RewardVideo]'): void {
         level,
         file: getRewardVideoFileName(level),
     }));
+    if (!ENABLE_DEBUG_LOGS) return;
     console.log(`${tag} === PLAN: 13 clip tại level ${REWARD_VIDEO_UNLOCK_LEVELS.join(', ')} ===`);
     console.table(rows);
     console.log(`${tag} Worker body mẫu:`, JSON.stringify({ file: getRewardVideoFileName(REWARD_VIDEO_UNLOCK_LEVELS[0]) }));
 }
 
 /**
- * Base URL Tevi Sandbox theo docs Environments:
- * Portal: https://developers.sbx.tevi.dev/
- * API:    https://developer-api.sbx.tevi.dev
+ * Base URL Tevi Production theo docs Environments:
+ * Portal: https://developers.tevi.com/
+ * API:    https://developer-api.tevi.com
+ * Sandbox cũ: https://developer-api.sbx.tevi.dev
  */
-export const TEVI_API_BASE = 'https://developer-api.sbx.tevi.dev';
+export const TEVI_API_BASE = 'https://developer-api.tevi.com';
 
 /**
  * Docs: top-up-signature gọi từ backend.
- * Game → Cloudflare Worker → Tevi Sandbox API (không lộ API Key trên client).
+ * Game → Cloudflare Worker → Tevi Production API (không lộ API Key trên client).
  */
 /** Cloudflare Worker base (video + top-up + webhook). */
 export const WORKER_BASE_URL =

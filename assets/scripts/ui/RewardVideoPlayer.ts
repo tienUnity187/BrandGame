@@ -18,7 +18,7 @@ import { EventBus } from '../core/EventBus';
 import { GameEvent } from '../enums/GameEvent';
 import { AudioManager } from '../managers/AudioManager';
 import { RewardVideoHistory } from '../services/RewardVideoHistory';
-import { REWARD_VIDEO_TOKEN_URL } from '../TeviConstants';
+import { ENABLE_DEBUG_LOGS, REWARD_VIDEO_TOKEN_URL } from '../TeviConstants';
 import { TeviLoginManager } from '../TeviLoginManager';
 
 const { ccclass, property } = _decorator;
@@ -105,13 +105,15 @@ export class RewardVideoPlayer extends Component {
         onClosedCallback?: () => void,
         levelId?: number,
     ): void {
-        console.log('[RewardVideoPlayer] playSecretVideo() called', {
-            videoFile,
-            levelId: levelId ?? 0,
-            tokenUrl: REWARD_VIDEO_TOKEN_URL,
-            plannedBody: { file: videoFile },
-            hasTeviToken: !!(TeviLoginManager.Instance?.getUserToken()?.trim()),
-        });
+        if (ENABLE_DEBUG_LOGS) {
+            console.log('[RewardVideoPlayer] playSecretVideo() called', {
+                videoFile,
+                levelId: levelId ?? 0,
+                tokenUrl: REWARD_VIDEO_TOKEN_URL,
+                plannedBody: { file: videoFile },
+                hasTeviToken: !!(TeviLoginManager.Instance?.getUserToken()?.trim()),
+            });
+        }
         void this.loadAndPlaySecretVideo(videoFile, onClosedCallback, levelId);
     }
 
@@ -187,7 +189,9 @@ export class RewardVideoPlayer extends Component {
 
             this._lastVideoUrl = secureVideoUrl;
             this.logStatus(`LINK tải: ${secureVideoUrl}`);
-            console.log('[RewardVideoPlayer] FULL VIDEO URL:', secureVideoUrl);
+            if (ENABLE_DEBUG_LOGS) {
+                console.log('[RewardVideoPlayer] FULL VIDEO URL:', secureVideoUrl);
+            }
 
             // Probe trước: biết file có tải được không trước khi đưa vào VideoPlayer.
             const probe = await this.probeVideoDownload(secureVideoUrl);
@@ -227,14 +231,16 @@ export class RewardVideoPlayer extends Component {
         const pageOrigin = this.getPageOrigin();
         const requestBody = { file: videoFile };
 
-        console.log('[RewardVideoPlayer] === REQUEST /video-token (verify wiring) ===');
-        console.log('[RewardVideoPlayer] POST', REWARD_VIDEO_TOKEN_URL);
-        console.log('[RewardVideoPlayer] Origin', pageOrigin || '(editor/no window.origin)');
-        console.log('[RewardVideoPlayer] Body', JSON.stringify(requestBody));
-        console.log(
-            '[RewardVideoPlayer] Authorization',
-            userToken ? `Bearer ${userToken.slice(0, 12)}...(${userToken.length} chars)` : '(MISSING — Editor thường không có)',
-        );
+        if (ENABLE_DEBUG_LOGS) {
+            console.log('[RewardVideoPlayer] === REQUEST /video-token (verify wiring) ===');
+            console.log('[RewardVideoPlayer] POST', REWARD_VIDEO_TOKEN_URL);
+            console.log('[RewardVideoPlayer] Origin', pageOrigin || '(editor/no window.origin)');
+            console.log('[RewardVideoPlayer] Body', JSON.stringify(requestBody));
+            console.log(
+                '[RewardVideoPlayer] Authorization',
+                userToken ? `Bearer ${userToken.slice(0, 12)}...(${userToken.length} chars)` : '(MISSING — Editor thường không có)',
+            );
+        }
 
         if (!userToken) {
             console.warn(
@@ -274,7 +280,9 @@ export class RewardVideoPlayer extends Component {
             throw new Error(`Worker HTTP ${response.status} nhưng body không phải JSON.`);
         }
 
-        console.log('[RewardVideoPlayer] /video-token response:', result);
+        if (ENABLE_DEBUG_LOGS) {
+            console.log('[RewardVideoPlayer] /video-token response:', result);
+        }
 
         if (!response.ok) {
             const parts = [
@@ -339,13 +347,15 @@ export class RewardVideoPlayer extends Component {
                 }
             }
 
-            console.log('[RewardVideoPlayer] Probe result:', {
-                url: videoUrl,
-                status: response.status,
-                contentType,
-                contentLength,
-                contentRange,
-            });
+            if (ENABLE_DEBUG_LOGS) {
+                console.log('[RewardVideoPlayer] Probe result:', {
+                    url: videoUrl,
+                    status: response.status,
+                    contentType,
+                    contentLength,
+                    contentRange,
+                });
+            }
 
             this.logStatus(
                 `Probe HTTP ${response.status} | ${contentType} | ${sizeText} | LINK=${this.shortenUrl(videoUrl)}`,
@@ -383,6 +393,7 @@ export class RewardVideoPlayer extends Component {
     }
 
     private logStatus(message: string): void {
+        if (!ENABLE_DEBUG_LOGS) return;
         const text = `Video: ${message}`;
         console.log('[RewardVideoPlayer]', message);
         TeviLoginManager.Instance?.setDebugStatus(text);

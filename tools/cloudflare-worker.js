@@ -23,9 +23,9 @@
  *
  * Variables:
  *   ALLOWED_ORIGIN=https://velvetnight.pages.dev
- *   APP_ID=DQX81404
- *   TEVI_API_BASE=https://developer-api.sbx.tevi.dev
- *   TEVI_VERIFY_URL=https://developer-api.sbx.tevi.dev/api/v1/auth/user
+ *   APP_ID=EMO78171
+ *   TEVI_API_BASE=https://developer-api.tevi.com
+ *   TEVI_VERIFY_URL=https://developer-api.tevi.com/api/v1/auth/user
  *   TOKEN_TTL_SECONDS=600
  *
  * Secrets:
@@ -198,7 +198,7 @@ async function verifyTeviWebhookSignature(payload, signatureHeader, secret) {
 async function verifyTeviUser(request, env) {
   const userAppToken = getBearer(request);
   if (!userAppToken) return null;
-  const verifyUrl = env.TEVI_VERIFY_URL || "https://developer-api.sbx.tevi.dev/api/v1/auth/user";
+  const verifyUrl = env.TEVI_VERIFY_URL || "https://developer-api.tevi.com/api/v1/auth/user";
   const response = await fetch(verifyUrl, {
     method: "GET",
     headers: { Authorization: `Bearer ${userAppToken}`, Accept: "application/json" },
@@ -534,8 +534,8 @@ async function createTopUpSignature(request, env) {
   }
 
   const orderId = `ORD_${Date.now()}_${crypto.randomUUID().slice(0, 8)}`;
-  const appId = String(env.APP_ID || body.app_id || "DQX81404").trim();
-  const teviBase = String(env.TEVI_API_BASE || "https://developer-api.sbx.tevi.dev").replace(/\/$/, "");
+  const appId = String(env.APP_ID || body.app_id || "EMO78171").trim();
+  const teviBase = String(env.TEVI_API_BASE || "https://developer-api.tevi.com").replace(/\/$/, "");
   const teviUrl = `${teviBase}/api/v1/payments/top-up-signature`;
   const teviBody = { amount, user_id: userId, order_id: orderId, app_id: appId };
 

@@ -1,7 +1,7 @@
 import { sys } from 'cc';
 import { EventBus } from '../core/EventBus';
 import { GameEvent } from '../enums/GameEvent';
-import { STARTING_STAR_BALANCE, STORAGE_KEYS } from '../TeviConstants';
+import { ENABLE_DEBUG_LOGS, STARTING_STAR_BALANCE, STORAGE_KEYS } from '../TeviConstants';
 
 /**
  * Ví Star lưu local (game offline, không backend).
@@ -22,7 +22,9 @@ export class StarWallet {
             const raw = sys.localStorage.getItem(STORAGE_KEYS.STAR_BALANCE);
             if (raw === null || raw === '') {
                 this.saveBalance(STARTING_STAR_BALANCE);
-                console.log(`[StarWallet] Welcome grant ${STARTING_STAR_BALANCE}★`);
+                if (ENABLE_DEBUG_LOGS) {
+                    console.log(`[StarWallet] Welcome grant ${STARTING_STAR_BALANCE}★`);
+                }
                 return STARTING_STAR_BALANCE;
             }
             const value = parseInt(raw, 10);
@@ -37,7 +39,9 @@ export class StarWallet {
         if (add <= 0) return this.getBalance();
         const next = this.getBalance() + add;
         this.saveBalance(next);
-        console.log(`[StarWallet] +${add} (${reason || 'add'}) → ${next}`);
+        if (ENABLE_DEBUG_LOGS) {
+            console.log(`[StarWallet] +${add} (${reason || 'add'}) → ${next}`);
+        }
         EventBus.getInstance().emit(GameEvent.STAR_BALANCE_CHANGED, next, add);
         return next;
     }
@@ -49,7 +53,9 @@ export class StarWallet {
         if (balance < cost) return false;
         const next = balance - cost;
         this.saveBalance(next);
-        console.log(`[StarWallet] -${cost} (${reason || 'spend'}) → ${next}`);
+        if (ENABLE_DEBUG_LOGS) {
+            console.log(`[StarWallet] -${cost} (${reason || 'spend'}) → ${next}`);
+        }
         EventBus.getInstance().emit(GameEvent.STAR_BALANCE_CHANGED, next, -cost);
         return true;
     }

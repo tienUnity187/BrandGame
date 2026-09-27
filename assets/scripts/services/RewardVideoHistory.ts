@@ -44,7 +44,6 @@ export class RewardVideoHistory {
         }
         list.sort((a, b) => a.levelId - b.levelId);
         this.save(list);
-        console.log(`[RewardVideoHistory] Đã lưu clip level ${id} (${file})`);
         return entry;
     }
 
