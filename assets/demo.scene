@@ -52,7 +52,7 @@
     },
     "autoReleaseAssets": false,
     "_globals": {
-      "__id__": 205
+      "__id__": 206
     },
     "_id": "4f03738f-57c4-4c34-b01d-73e089a199e2"
   },
@@ -69,17 +69,14 @@
         "__id__": 3
       },
       {
-        "__id__": 193
+        "__id__": 194
       },
       {
-        "__id__": 197
+        "__id__": 198
       }
     ],
     "_active": true,
     "_components": [
-      {
-        "__id__": 201
-      },
       {
         "__id__": 202
       },
@@ -88,13 +85,16 @@
       },
       {
         "__id__": 204
+      },
+      {
+        "__id__": 205
       }
     ],
     "_prefab": null,
     "_lpos": {
       "__type__": "cc.Vec3",
       "x": 540,
-      "y": 960,
+      "y": 960.0000000000002,
       "z": 0
     },
     "_lrot": {
@@ -139,16 +139,16 @@
         "__id__": 172
       },
       {
-        "__id__": 189
+        "__id__": 190
       }
     ],
     "_active": true,
     "_components": [
       {
-        "__id__": 191
+        "__id__": 192
       },
       {
-        "__id__": 192
+        "__id__": 193
       }
     ],
     "_prefab": null,
@@ -6560,13 +6560,13 @@
         "__id__": 181
       },
       {
-        "__id__": 185
+        "__id__": 186
       }
     ],
     "_active": false,
     "_components": [
       {
-        "__id__": 188
+        "__id__": 189
       }
     ],
     "_prefab": null,
@@ -6924,6 +6924,9 @@
       },
       {
         "__id__": 184
+      },
+      {
+        "__id__": 185
       }
     ],
     "_prefab": null,
@@ -7070,6 +7073,36 @@
     "_id": "btnClipsBtn01SGFoodClipGallery"
   },
   {
+    "__type__": "cc.Widget",
+    "_name": "",
+    "_objFlags": 0,
+    "__editorExtras__": {},
+    "node": {
+      "__id__": 181
+    },
+    "_enabled": true,
+    "__prefab": null,
+    "_alignFlags": 9,
+    "_target": null,
+    "_left": -456.948,
+    "_right": 0,
+    "_top": -880.618,
+    "_bottom": 0,
+    "_horizontalCenter": 0,
+    "_verticalCenter": 0,
+    "_isAbsLeft": true,
+    "_isAbsRight": true,
+    "_isAbsTop": true,
+    "_isAbsBottom": true,
+    "_isAbsHorizontalCenter": true,
+    "_isAbsVerticalCenter": true,
+    "_originalWidth": 0,
+    "_originalHeight": 0,
+    "_alignMode": 2,
+    "_lockFlags": 0,
+    "_id": "3f6um9fGVB96VLp1PPBI7S"
+  },
+  {
     "__type__": "cc.Node",
     "_name": "Note",
     "_objFlags": 0,
@@ -7081,16 +7114,16 @@
     "_active": true,
     "_components": [
       {
-        "__id__": 186
+        "__id__": 187
       },
       {
-        "__id__": 187
+        "__id__": 188
       }
     ],
     "_prefab": null,
     "_lpos": {
       "__type__": "cc.Vec3",
-      "x": -3.921,
+      "x": -0.4794999999999998,
       "y": -481.338,
       "z": 0
     },
@@ -7123,13 +7156,13 @@
     "_objFlags": 0,
     "__editorExtras__": {},
     "node": {
-      "__id__": 185
+      "__id__": 186
     },
     "_enabled": true,
     "__prefab": null,
     "_contentSize": {
       "__type__": "cc.Size",
-      "width": 756.0471562500002,
+      "width": 978.6001562500003,
       "height": 536.228
     },
     "_anchorPoint": {
@@ -7145,7 +7178,7 @@
     "_objFlags": 0,
     "__editorExtras__": {},
     "node": {
-      "__id__": 185
+      "__id__": 186
     },
     "_enabled": true,
     "__prefab": null,
@@ -7160,7 +7193,7 @@
       "a": 255
     },
     "_string": "Velvet Nights is a seductive Puzzle × Dating game where every match brings you closer to her desires.\n\nMatch 3 requested items in the right order, charm her, progress through special levels, and unlock exclusive clips accompanied by captivating music and an intoxicating romantic atmosphere.\n\nRead her desires. Make the perfect match. Enter the night.",
-    "_horizontalAlign": 0,
+    "_horizontalAlign": 1,
     "_verticalAlign": 1,
     "_actualFontSize": 30,
     "_fontSize": 30,
@@ -7238,7 +7271,7 @@
     "_active": true,
     "_components": [
       {
-        "__id__": 190
+        "__id__": 191
       }
     ],
     "_prefab": null,
@@ -7277,7 +7310,7 @@
     "_objFlags": 0,
     "__editorExtras__": {},
     "node": {
-      "__id__": 189
+      "__id__": 190
     },
     "_enabled": true,
     "__prefab": null,
@@ -7285,7 +7318,7 @@
     "_priority": 0,
     "_fov": 45,
     "_fovAxis": 0,
-    "_orthoHeight": 960,
+    "_orthoHeight": 960.0000000000001,
     "_near": 0,
     "_far": 2000,
     "_color": {
@@ -7394,13 +7427,13 @@
     "_active": false,
     "_components": [
       {
-        "__id__": 194
-      },
-      {
         "__id__": 195
       },
       {
         "__id__": 196
+      },
+      {
+        "__id__": 197
       }
     ],
     "_prefab": null,
@@ -7439,7 +7472,7 @@
     "_objFlags": 0,
     "__editorExtras__": {},
     "node": {
-      "__id__": 193
+      "__id__": 194
     },
     "_enabled": true,
     "__prefab": null,
@@ -7461,7 +7494,7 @@
     "_objFlags": 0,
     "__editorExtras__": {},
     "node": {
-      "__id__": 193
+      "__id__": 194
     },
     "_enabled": true,
     "__prefab": null,
@@ -7523,7 +7556,7 @@
     "_objFlags": 0,
     "__editorExtras__": {},
     "node": {
-      "__id__": 193
+      "__id__": 194
     },
     "_enabled": true,
     "__prefab": null,
@@ -7559,13 +7592,13 @@
     "_active": false,
     "_components": [
       {
-        "__id__": 198
-      },
-      {
         "__id__": 199
       },
       {
         "__id__": 200
+      },
+      {
+        "__id__": 201
       }
     ],
     "_prefab": null,
@@ -7604,7 +7637,7 @@
     "_objFlags": 0,
     "__editorExtras__": {},
     "node": {
-      "__id__": 197
+      "__id__": 198
     },
     "_enabled": true,
     "__prefab": null,
@@ -7626,7 +7659,7 @@
     "_objFlags": 0,
     "__editorExtras__": {},
     "node": {
-      "__id__": 197
+      "__id__": 198
     },
     "_enabled": true,
     "__prefab": null,
@@ -7688,7 +7721,7 @@
     "_objFlags": 0,
     "__editorExtras__": {},
     "node": {
-      "__id__": 197
+      "__id__": 198
     },
     "_enabled": true,
     "__prefab": null,
@@ -7725,7 +7758,7 @@
     "_contentSize": {
       "__type__": "cc.Size",
       "width": 1080,
-      "height": 1920
+      "height": 1920.0000000000002
     },
     "_anchorPoint": {
       "__type__": "cc.Vec2",
@@ -7745,7 +7778,7 @@
     "_enabled": true,
     "__prefab": null,
     "_cameraComponent": {
-      "__id__": 190
+      "__id__": 191
     },
     "_alignCanvasWithScreen": true,
     "_id": "fdFTfo1DpOm6OMaC7l/WqF"
@@ -7791,10 +7824,10 @@
     "_enabled": true,
     "__prefab": null,
     "statusLabel": {
-      "__id__": 195
+      "__id__": 196
     },
     "userInfoLabel": {
-      "__id__": 199
+      "__id__": 200
     },
     "showLoginPopup": true,
     "_id": "f29jelVfJDuZUWDBYhql1d"
@@ -7802,28 +7835,28 @@
   {
     "__type__": "cc.SceneGlobals",
     "ambient": {
-      "__id__": 206
-    },
-    "shadows": {
       "__id__": 207
     },
-    "_skybox": {
+    "shadows": {
       "__id__": 208
     },
-    "fog": {
+    "_skybox": {
       "__id__": 209
     },
-    "octree": {
+    "fog": {
       "__id__": 210
     },
-    "skin": {
+    "octree": {
       "__id__": 211
     },
-    "lightProbeInfo": {
+    "skin": {
       "__id__": 212
     },
-    "postSettings": {
+    "lightProbeInfo": {
       "__id__": 213
+    },
+    "postSettings": {
+      "__id__": 214
     },
     "bakedWithStationaryMainLight": false,
     "bakedWithHighpLightmap": false

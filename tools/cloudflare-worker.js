@@ -1,7 +1,19 @@
 /**
  * VelvetNight — Cloudflare Worker (dán vào Dashboard → fancy-sun-962d)
- * WORKER_VERSION: 1.0.17
+ * WORKER_VERSION: 1.0.24
  *
+ * 1.0.24: SDK callback chỉ mark paid khi call=ok. Hủy bỏ không cộng coin.
+ * 1.0.23: GET/POST /api/wallet — số coin game theo user, không hết hạn.
+ *   Credit order_id chỉ cộng một lần. Không bị 20 coin chào mừng ghi đè.
+ * 1.0.22: Bỏ developer-api.tevi.com. Mọi gọi Tevi dùng developer-api.flowstreamx.com
+ *   (kể cả khi Dashboard còn TEVI_API_BASE / TEVI_VERIFY_URL trỏ tevi.com hoặc sbx).
+ * 1.0.20: Clip + tiến trình không phụ thuộc verify host Tevi.
+ *   — Token user vẫn là JWT hợp lệ thì cấp video (API Tevi 530/401 không chặn clip).
+ *   — GET/POST /api/progress lưu level theo user, WebView không giữ localStorage.
+ * 1.0.19: TEVI_API_BASE / TEVI_VERIFY_URL còn sbx.tevi.dev thì gọi production.
+ *   Fetch Tevi ra HTTP 530 (Cloudflare không resolve host sandbox).
+ * 1.0.18: GET /api/user-balance — game không gọi thẳng developer-api
+ *   (WebView product báo "Load failed" vì CORS).
  * 1.0.17: KV edge cache ~60s làm poll status kẹt pending dù webhook Tevi về ngay.
  *   — TeviJS.topup call=ok = đã trừ Star → Worker mark paid ngay (cùng colo user).
  *   — KV get cacheTtl=0 + paid-flag key (không đọc key này khi còn pending).
@@ -10,6 +22,9 @@
  * Routes:
  *   POST /api/video-token
  *   GET|HEAD /api/video
+ *   GET|POST /api/progress
+ *   GET|POST /api/wallet
+ *   GET  /api/user-balance
  *   POST /api/top-up-signature
  *   GET  /api/top-up-status?order_id=...
  *   GET  /api/top-up-unclaimed
@@ -24,8 +39,8 @@
  * Variables:
  *   ALLOWED_ORIGIN=https://velvetnight.pages.dev
  *   APP_ID=EMO78171
- *   TEVI_API_BASE=https://developer-api.tevi.com
- *   TEVI_VERIFY_URL=https://developer-api.tevi.com/api/v1/auth/user
+ *   TEVI_API_BASE=https://developer-api.flowstreamx.com
+ *   TEVI_VERIFY_URL=https://developer-api.flowstreamx.com/api/v1/auth/user
  *   TOKEN_TTL_SECONDS=600
  *
  * Secrets:
@@ -34,7 +49,8 @@
  *   TEVI_API_KEY          ← Tevi API key (chỉ trên Worker, không đưa vào game)
  */
 
-const WORKER_VERSION = "1.0.17";
+const WORKER_VERSION = "1.0.24";
+const TEVI_PRODUCTION_API = "https://developer-api.flowstreamx.com";
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 /** Game clip 1–13 → vn_reward_01.mp4…13.mp4; alias legacy nếu R2 còn tên cũ. */
@@ -81,6 +97,15 @@ export default {
       }
       if (url.pathname === "/api/video" && (request.method === "GET" || request.method === "HEAD")) {
         return serveVideo(request, env);
+      }
+      if (url.pathname === "/api/user-balance" && request.method === "GET") {
+        return getUserBalance(request, env);
+      }
+      if (url.pathname === "/api/progress" && (request.method === "GET" || request.method === "POST")) {
+        return handleProgress(request, env);
+      }
+      if (url.pathname === "/api/wallet" && (request.method === "GET" || request.method === "POST")) {
+        return handleWallet(request, env);
       }
       if (url.pathname === "/api/top-up-signature" && request.method === "POST") {
         return createTopUpSignature(request, env);
@@ -195,20 +220,232 @@ async function verifyTeviWebhookSignature(payload, signatureHeader, secret) {
   return timingSafeEqual(expected.toLowerCase(), String(signatureHeader).trim().toLowerCase());
 }
 
+/** tevi.com và sandbox không còn dùng. Dashboard còn biến cũ thì vẫn gọi flowstreamx. */
+function teviApiBase(env) {
+  let base = String(env.TEVI_API_BASE || TEVI_PRODUCTION_API).trim();
+  base = base.replace(/\/+$/, "");
+  base = base.replace(/\/api\/v1\/.*$/i, "");
+  if (!/^https?:\/\//i.test(base)) base = `https://${base}`;
+  base = base.replace(/\/+$/, "");
+  if (/tevi\.com|sbx\.tevi\.dev/i.test(base)) return TEVI_PRODUCTION_API;
+  return base;
+}
+
+function teviVerifyUrl(env) {
+  const configured = String(env.TEVI_VERIFY_URL || "").trim();
+  if (!configured || /tevi\.com|sbx\.tevi\.dev/i.test(configured)) {
+    return `${teviApiBase(env)}/api/v1/auth/user`;
+  }
+  return configured;
+}
+
+async function fetchTeviPath(env, path, init) {
+  const url = `${teviApiBase(env)}${path}`;
+  try {
+    const res = await fetch(url, init);
+    const raw = await res.text();
+    return { url, status: res.status, raw, attempts: [] };
+  } catch (err) {
+    return { url, status: 0, raw: String(err?.message || err), attempts: [], allFailed: true };
+  }
+}
+
+function userFromJwt(token, env) {
+  const claims = decodeJwtPayload(token);
+  if (!claims || typeof claims !== "object") return null;
+  const exp = Number(claims.exp || 0);
+  if (exp > 0 && exp * 1000 < Date.now() - 60_000) return null;
+  const app = String(claims.app_id || claims.appId || claims.aud || "").trim();
+  const expect = String(env.APP_ID || "EMO78171").trim();
+  if (expect && app && app !== expect) return null;
+  const userId = String(claims.user_id || claims.userId || claims.sub || claims.id || "").trim();
+  if (!userId) return null;
+  return { user_id: userId, app_id: app || expect, via: "jwt" };
+}
+
 async function verifyTeviUser(request, env) {
   const userAppToken = getBearer(request);
   if (!userAppToken) return null;
-  const verifyUrl = env.TEVI_VERIFY_URL || "https://developer-api.tevi.com/api/v1/auth/user";
-  const response = await fetch(verifyUrl, {
-    method: "GET",
-    headers: { Authorization: `Bearer ${userAppToken}`, Accept: "application/json" },
-  });
-  if (!response.ok) return null;
+  const verifyUrl = teviVerifyUrl(env);
   try {
-    return await response.json();
-  } catch {
-    return { ok: true };
+    const response = await fetch(verifyUrl, {
+      method: "GET",
+      headers: { Authorization: `Bearer ${userAppToken}`, Accept: "application/json" },
+    });
+    if (response.ok) {
+      try {
+        return await response.json();
+      } catch {
+        return { ok: true };
+      }
+    }
+    console.warn("[verifyTeviUser] upstream", response.status, verifyUrl);
+  } catch (err) {
+    console.warn("[verifyTeviUser] fetch failed", verifyUrl, err?.message || err);
   }
+  return userFromJwt(userAppToken, env);
+}
+
+function progressKey(userId) {
+  return `progress:${userId}`;
+}
+
+async function handleProgress(request, env) {
+  const originError = validateOrigin(request, env);
+  if (originError) return originError;
+  const user = await verifyTeviUser(request, env);
+  const userId = extractUserIdFromClaims(user)
+    || extractUserIdFromClaims(userFromJwt(getBearer(request), env));
+  if (!userId) {
+    return json({ success: false, message: "Unauthorized" }, 401, request, env);
+  }
+  if (!env.TOPUP_ORDERS) {
+    return json({ success: true, levelId: 0, worker_version: WORKER_VERSION }, 200, request, env);
+  }
+
+  if (request.method === "GET") {
+    const raw = await kvGet(env, progressKey(userId));
+    let levelId = 0;
+    if (raw) {
+      try { levelId = Math.floor(Number(JSON.parse(raw).levelId) || 0); } catch { levelId = 0; }
+    }
+    return json({ success: true, levelId, worker_version: WORKER_VERSION }, 200, request, env);
+  }
+
+  let body = {};
+  try { body = await request.json(); } catch { body = {}; }
+  const levelId = Math.min(50, Math.max(1, Math.floor(Number(body.levelId) || 0)));
+  if (!levelId) {
+    return json({ success: false, message: "Invalid levelId" }, 400, request, env);
+  }
+  const existingRaw = await kvGet(env, progressKey(userId));
+  let existing = 0;
+  if (existingRaw) {
+    try { existing = Math.floor(Number(JSON.parse(existingRaw).levelId) || 0); } catch { existing = 0; }
+  }
+  const next = Math.max(existing, levelId);
+  await env.TOPUP_ORDERS.put(progressKey(userId), JSON.stringify({
+    levelId: next,
+    user_id: userId,
+    updated_at: new Date().toISOString(),
+  }));
+  return json({ success: true, levelId: next, worker_version: WORKER_VERSION }, 200, request, env);
+}
+
+function walletKey(userId) {
+  return `wallet:${userId}`;
+}
+
+function mergeWalletOrders(record, ids) {
+  if (!Array.isArray(ids)) return;
+  for (const raw of ids) {
+    const id = String(raw || "").trim();
+    if (!id || record.orders.includes(id)) continue;
+    record.orders.push(id);
+  }
+  if (record.orders.length > 200) {
+    record.orders = record.orders.slice(-200);
+  }
+}
+
+async function readWallet(env, userId) {
+  const raw = await kvGet(env, walletKey(userId));
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    const balance = Math.max(0, Math.floor(Number(parsed.balance) || 0));
+    const orders = Array.isArray(parsed.orders)
+      ? parsed.orders.map((id) => String(id || "").trim()).filter(Boolean).slice(-200)
+      : [];
+    return { balance, orders };
+  } catch {
+    return null;
+  }
+}
+
+async function writeWallet(env, userId, record) {
+  await env.TOPUP_ORDERS.put(walletKey(userId), JSON.stringify({
+    balance: record.balance,
+    orders: record.orders.slice(-200),
+    user_id: userId,
+    updated_at: new Date().toISOString(),
+  }));
+}
+
+async function handleWallet(request, env) {
+  const originError = validateOrigin(request, env);
+  if (originError) return originError;
+  const user = await verifyTeviUser(request, env);
+  const userId = extractUserIdFromClaims(user)
+    || extractUserIdFromClaims(userFromJwt(getBearer(request), env));
+  if (!userId) {
+    return json({ success: false, message: "Unauthorized" }, 401, request, env);
+  }
+  if (!env.TOPUP_ORDERS) {
+    return json({ success: true, exists: false, balance: 0, worker_version: WORKER_VERSION }, 200, request, env);
+  }
+
+  const current = await readWallet(env, userId);
+  if (request.method === "GET") {
+    if (!current) {
+      return json({ success: true, exists: false, balance: 0, worker_version: WORKER_VERSION }, 200, request, env);
+    }
+    return json({
+      success: true,
+      exists: true,
+      balance: current.balance,
+      worker_version: WORKER_VERSION,
+    }, 200, request, env);
+  }
+
+  let body = {};
+  try { body = await request.json(); } catch { body = {}; }
+  const op = String(body.op || "set");
+  const clientBalance = Math.max(0, Math.floor(Number(body.balance) || 0));
+  const record = current || { balance: 0, orders: [] };
+
+  if (op === "credit") {
+    const orderId = String(body.orderId || "").trim();
+    const stars = Math.max(0, Math.floor(Number(body.stars) || 0));
+    if (!orderId || stars <= 0) {
+      return json({ success: false, message: "Invalid credit" }, 400, request, env);
+    }
+    if (record.orders.includes(orderId)) {
+      return json({
+        success: true,
+        exists: true,
+        already: true,
+        balance: record.balance,
+        worker_version: WORKER_VERSION,
+      }, 200, request, env);
+    }
+    record.orders.push(orderId);
+    mergeWalletOrders(record, body.knownOrderIds);
+    record.balance = Math.max(record.balance + stars, clientBalance);
+    await writeWallet(env, userId, record);
+    return json({
+      success: true,
+      exists: true,
+      already: false,
+      balance: record.balance,
+      worker_version: WORKER_VERSION,
+    }, 200, request, env);
+  }
+
+  mergeWalletOrders(record, body.knownOrderIds);
+  if (body.allowDecrease === true) {
+    record.balance = clientBalance;
+  } else {
+    record.balance = Math.max(record.balance, clientBalance);
+  }
+  await writeWallet(env, userId, record);
+  return json({
+    success: true,
+    exists: true,
+    already: false,
+    balance: record.balance,
+    worker_version: WORKER_VERSION,
+  }, 200, request, env);
 }
 
 function orderKey(orderId) {
@@ -278,10 +515,14 @@ async function kvPut(env, key, value) {
 
 function isSdkTopupSuccess(sdk) {
   if (!sdk || typeof sdk !== "object") return false;
-  const callOk = `${sdk.call || ""}` === "ok";
+  const call = `${sdk.call || ""}`.trim().toLowerCase();
+  if (call !== "ok") return false;
   const code = sdk.error_code;
   const hasError = code !== undefined && code !== null && `${code}` !== "" && `${code}` !== "0";
-  return callOk || !hasError;
+  if (hasError) return false;
+  const text = `${sdk.error_message || ""} ${sdk.message || ""} ${sdk.status || ""}`.toLowerCase();
+  if (/cancel|hủy|huy|abort|dismiss/.test(text)) return false;
+  return true;
 }
 
 async function saveOrder(env, record) {
@@ -506,6 +747,49 @@ async function serveVideo(request, env) {
   return new Response(request.method === "HEAD" ? null : object.body, { status: 200, headers });
 }
 
+/* ===================== USER BALANCE ===================== */
+
+async function getUserBalance(request, env) {
+  const originError = validateOrigin(request, env);
+  if (originError) return originError;
+
+  const userAppToken = getBearer(request);
+  if (!userAppToken) {
+    return json({ success: false, message: "Missing user_app_token" }, 401, request, env);
+  }
+
+  const result = await fetchTeviPath(env, "/api/v1/auth/user/balance", {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${userAppToken}`,
+      Accept: "application/json",
+    },
+  });
+  const teviUrl = result.url;
+  const raw = result.raw || "";
+  let teviJson = {};
+  try {
+    teviJson = JSON.parse(raw);
+  } catch {
+    const tried = (result.attempts || []).map((item) => item.url).concat(teviUrl).filter(Boolean);
+    const snippet = raw.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 140);
+    return json({
+      success: false,
+      message: `Tevi balance HTTP ${result.status || 502} from ${teviUrl}, body is not JSON.`
+        + ` Tried ${[...new Set(tried)].join(" | ")}.`
+        + (snippet ? ` ${snippet}` : ""),
+      worker_version: WORKER_VERSION,
+      tevi_url: teviUrl,
+    }, 502, request, env);
+  }
+
+  if (teviJson && typeof teviJson === "object") {
+    teviJson.worker_version = WORKER_VERSION;
+    teviJson.tevi_url = teviUrl;
+  }
+  return json(teviJson, result.status || 502, request, env);
+}
+
 /* ===================== TOP-UP SIGNATURE ===================== */
 
 async function createTopUpSignature(request, env) {
@@ -535,11 +819,8 @@ async function createTopUpSignature(request, env) {
 
   const orderId = `ORD_${Date.now()}_${crypto.randomUUID().slice(0, 8)}`;
   const appId = String(env.APP_ID || body.app_id || "EMO78171").trim();
-  const teviBase = String(env.TEVI_API_BASE || "https://developer-api.tevi.com").replace(/\/$/, "");
-  const teviUrl = `${teviBase}/api/v1/payments/top-up-signature`;
   const teviBody = { amount, user_id: userId, order_id: orderId, app_id: appId };
-
-  const teviRes = await fetch(teviUrl, {
+  const teviCall = await fetchTeviPath(env, "/api/v1/payments/top-up-signature", {
     method: "POST",
     headers: {
       Authorization: `Bearer ${userAppToken}`,
@@ -548,8 +829,9 @@ async function createTopUpSignature(request, env) {
     },
     body: JSON.stringify(teviBody),
   });
-
-  const teviRawText = await teviRes.text();
+  const teviUrl = teviCall.url;
+  const teviRes = { ok: teviCall.status >= 200 && teviCall.status < 300, status: teviCall.status || 502 };
+  const teviRawText = teviCall.raw || "";
   let teviJson = {};
   try { teviJson = JSON.parse(teviRawText); } catch {
     teviJson = { success: false, message: `Tevi non-JSON HTTP ${teviRes.status}` };

@@ -448,7 +448,6 @@ export class TutorialOverlay extends Component {
             nameLabel.color = Color.WHITE;
             nameLabel.horizontalAlign = Label.HorizontalAlign.RIGHT;
             nameLabel.verticalAlign = Label.VerticalAlign.CENTER;
-            nameLabel.isBold = true;
             nameLabel.overflow = Label.Overflow.NONE;
 
             const costNode = this.ensureChild(row, 'Cost', 80, rowH);
@@ -462,7 +461,6 @@ export class TutorialOverlay extends Component {
             costLabel.color = new Color(255, 220, 90, 255);
             costLabel.horizontalAlign = Label.HorizontalAlign.RIGHT;
             costLabel.verticalAlign = Label.VerticalAlign.CENTER;
-            costLabel.isBold = true;
 
             const iconNode = this.ensureChild(row, 'Money', iconSize, iconSize);
             this.setNodeSize(iconNode, iconSize, iconSize);
@@ -852,7 +850,6 @@ export class TutorialOverlay extends Component {
             this.titleLabel.color = new Color(255, 220, 90, 255);
             this.titleLabel.horizontalAlign = Label.HorizontalAlign.CENTER;
             this.titleLabel.verticalAlign = Label.VerticalAlign.CENTER;
-            this.titleLabel.isBold = true;
         }
         if (!this.bodyLabel) {
             const bodyNode = this.ensureChild(this.popupNode, 'Body', 560, 130);

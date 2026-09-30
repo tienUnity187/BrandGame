@@ -21,6 +21,36 @@ export function runTeviPaymentServiceTests(): TestRunner {
             );
         });
 
+        t.it('cancel callback does not count as paid', () => {
+            t.assertTrue(
+                TeviPaymentService.isTopupCallbackPaid({ call: 'ok' }),
+                'call=ok is paid',
+            );
+            t.assertTrue(
+                !TeviPaymentService.isTopupCallbackPaid({ call: 'cancel' }),
+                'call=cancel is not paid',
+            );
+            t.assertTrue(
+                !TeviPaymentService.isTopupCallbackPaid({}),
+                'empty callback (Hủy bỏ without error_code) is not paid',
+            );
+            t.assertTrue(
+                !TeviPaymentService.isTopupCallbackPaid({ call: 'ok', error_code: 1 }),
+                'error_code blocks credit',
+            );
+            t.assertTrue(
+                !TeviPaymentService.isTopupCallbackPaid({ call: 'ok', message: 'User cancelled' }),
+                'cancel message blocks credit',
+            );
+        });
+
+        t.it('pack_1 exchanges 1 star for 1 coin', () => {
+            const pack = payment.getPackById('pack_1');
+            t.assertTrue(!!pack, 'pack_1 must exist');
+            t.assertEquals(pack?.amount, 1, 'costs 1 Tevi star');
+            t.assertEquals(pack?.stars, 1, 'grants 1 coin');
+        });
+
         t.it('debugCreditOnSdkOk adds pack stars without waiting webhook', () => {
             const before = StarWallet.getInstance().getBalance();
             const result = payment.debugCreditOnSdkOk('pack_100');

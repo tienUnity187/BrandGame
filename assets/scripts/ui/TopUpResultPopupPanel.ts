@@ -39,12 +39,12 @@ export interface IWalletShortageInfo {
 
 const { ccclass, property } = _decorator;
 
-const SAMPLE_TITLE = 'Not enough coins';
+const SAMPLE_TITLE = 'Not enough stars';
 const SAMPLE_BODY =
-    'Not enough coins.\n\n'
-    + 'Your wallet: 0\n'
-    + 'This pack needs: 100\n\n'
-    + 'Top up your Tevi wallet first, then try again.';
+    'Not enough stars.\n\n'
+    + 'Your wallet: 20 Star\n'
+    + 'This pack needs: 100 Star\n\n'
+    + 'Top up Stars in Tevi first, then try again.';
 
 /**
  * Popup kết quả / lỗi nạp sao (thiếu sao Tevi, top-up failed…).
@@ -82,6 +82,7 @@ export class TopUpResultPopupPanel extends Component {
     private _topUpBar: Node | null = null;
     private _coinMessageRoot: Node | null = null;
     private _moneySprite: SpriteFrame | null = null;
+    private _starSprite: SpriteFrame | null = null;
     private _bodyOriginalSize: Size | null = null;
     private _bodyOriginalPos: Vec3 | null = null;
 
@@ -377,7 +378,6 @@ export class TopUpResultPopupPanel extends Component {
         label.fontSize = src?.fontSize || 30;
         label.lineHeight = src?.lineHeight || 38;
         label.color = src?.color?.clone() || Color.WHITE;
-        label.isBold = true;
         label.enableWrapText = false;
         if (src?.font) {
             label.font = src.font;
@@ -395,7 +395,6 @@ export class TopUpResultPopupPanel extends Component {
         label.fontSize = src?.fontSize || 38;
         label.lineHeight = src?.lineHeight || 44;
         label.color = src?.color?.clone() || new Color(255, 220, 90, 255);
-        label.isBold = true;
         label.enableWrapText = false;
         if (src?.font) {
             label.font = src.font;
@@ -417,11 +416,13 @@ export class TopUpResultPopupPanel extends Component {
             root.getChildByName('NeedRow'),
             `You need ${shortage.cost}`,
             `to use ${shortage.actionName}.`,
+            'coin',
         );
         this.fillCoinRow(
             root.getChildByName('BalanceRow'),
             `Your balance: ${shortage.balance}`,
             '',
+            'coin',
         );
         this.refreshCoinMessageLayout();
     }
@@ -433,13 +434,15 @@ export class TopUpResultPopupPanel extends Component {
         if (titleRow) titleRow.active = false;
         this.fillCoinRow(
             root.getChildByName('NeedRow'),
-            `Your wallet: ${shortage.wallet}`,
+            `Your wallet: ${shortage.wallet} Star`,
             '',
+            'star',
         );
         this.fillCoinRow(
             root.getChildByName('BalanceRow'),
-            `This pack needs: ${shortage.need}`,
+            `This pack needs: ${shortage.need} Star`,
             '',
+            'star',
         );
         this.refreshCoinMessageLayout();
     }
@@ -455,11 +458,13 @@ export class TopUpResultPopupPanel extends Component {
             root.getChildByName('NeedRow'),
             `+${success.stars}`,
             success.fromPreviousPurchase ? 'added to your wallet!' : 'added!',
+            'coin',
         );
         this.fillCoinRow(
             root.getChildByName('BalanceRow'),
             `Total: ${success.balance}`,
             '',
+            'coin',
         );
         this.refreshCoinMessageLayout();
     }
@@ -476,7 +481,12 @@ export class TopUpResultPopupPanel extends Component {
         }, 0);
     }
 
-    private fillCoinRow(row: Node | null, left: string, right: string): void {
+    private fillCoinRow(
+        row: Node | null,
+        left: string,
+        right: string,
+        icon: 'coin' | 'star' = 'coin',
+    ): void {
         if (!row?.isValid) return;
         const leftLabel = row.getChildByName('Left')?.getComponent(Label);
         const rightLabel = row.getChildByName('Right')?.getComponent(Label);
@@ -484,7 +494,48 @@ export class TopUpResultPopupPanel extends Component {
         if (leftLabel) leftLabel.string = left;
         if (rightLabel) rightLabel.string = right;
         if (rightNode) rightNode.active = !!right;
+        this.setRowIcon(row, icon);
         row.getComponent(Layout)?.updateLayout();
+    }
+
+    /** Ví Tevi và giá gói là Star. Coin chỉ dùng cho số coin trong game. */
+    private setRowIcon(row: Node, icon: 'coin' | 'star'): void {
+        const coin = row.getChildByName('Coin');
+        let star = row.getChildByName('Star');
+        if (icon === 'star' && !star?.isValid) {
+            star = this.makeRowCoin(row);
+            star.name = 'Star';
+        }
+        if (coin) coin.active = icon === 'coin';
+        if (star) {
+            star.active = icon === 'star';
+            const left = row.getChildByName('Left');
+            if (left) star.setSiblingIndex(left.getSiblingIndex() + 1);
+        }
+        if (icon === 'star' && star) this.applyStarSprite(star);
+    }
+
+    private applyStarSprite(starNode: Node): void {
+        const sprite = starNode.getComponent(Sprite);
+        if (!sprite) return;
+        if (this._starSprite) {
+            sprite.spriteFrame = this._starSprite;
+            return;
+        }
+        const skinId = SkinManager.getInstance()?.getCurrentSkin()?.skinId || 'uma';
+        const paths = [`skins/${skinId}/ui/star/spriteFrame`, 'skins/uma/ui/star/spriteFrame'];
+        const tryLoad = (index: number) => {
+            if (index >= paths.length) return;
+            resources.load(paths[index], SpriteFrame, (err, sf) => {
+                if (err || !sf) {
+                    tryLoad(index + 1);
+                    return;
+                }
+                this._starSprite = sf;
+                if (sprite.isValid) sprite.spriteFrame = sf;
+            });
+        };
+        tryLoad(0);
     }
 
     private placeCoinMessage(centerInPanel: boolean): void {

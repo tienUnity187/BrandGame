@@ -130,6 +130,10 @@ export class TopUpPendingStore {
         }
     }
 
+    public getCreditedOrderIds(): string[] {
+        return [...this.getCreditedIds()];
+    }
+
     public isCredited(orderId: string): boolean {
         return this.getCreditedIds().has(orderId.trim());
     }

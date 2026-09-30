@@ -10,6 +10,10 @@ import { UIManager } from './UIManager';
 import { AudioManager } from './AudioManager';
 import { SkinManager } from './SkinManager';
 import { SaveManager } from '../core/SaveManager';
+import { pullLevelProgress } from '../services/ProgressSync';
+import { pullWalletBalance, pushWalletBalance } from '../services/WalletSync';
+import { StarWallet } from '../services/StarWallet';
+import { TopUpPendingStore } from '../services/TopUpPendingStore';
 import { OrderTrayManager } from './OrderTrayManager';
 import { WrongTrayManager } from './WrongTrayManager';
 import { BoosterManager } from './BoosterManager';
@@ -24,6 +28,7 @@ import {
     logRewardVideoFilePlan,
     REWARD_VIDEO_TOKEN_URL,
     REWARD_VIDEO_UNLOCK_LEVELS,
+    STARTING_STAR_BALANCE,
 } from '../TeviConstants';
 import { RewardVideoHistory } from '../services/RewardVideoHistory';
 import { RewardVideoGalleryPanel } from '../ui/RewardVideoGalleryPanel';
@@ -254,6 +259,7 @@ export class GameManager extends Component {
             // Thắng rồi: lưu level tiếp theo để mở lại game tiếp tục đúng tiến trình.
             const nextLevelId = Math.min(FINAL_LEVEL_ID, Math.max(1, levelId + 1));
             SaveManager.getInstance().saveCurrentLevel(nextLevelId);
+            this.refreshClipsButtonLabel();
 
             if (levelId >= FINAL_LEVEL_ID) {
                 await this.handleFinalLevelCompleted(levelId);
@@ -676,6 +682,7 @@ export class GameManager extends Component {
     private async onClipsButtonClicked(): Promise<void> {
         debugLog('[RewardVideo] Click Clip → open RewardVideoGalleryPanel');
         await this.waitForInitialization();
+        await this.syncLevelProgress();
         this.ensureRewardVideoPlayer();
         RewardVideoPlayer.Instance?.mountOnVisibleRoot();
         const panel = await UIManager.getInstance().openPanel('RewardVideoGalleryPanel');
@@ -772,6 +779,8 @@ export class GameManager extends Component {
 
     private async onPlayGameClicked(): Promise<void> {
         if (this._transitionRunning) return;
+        await this.syncLevelProgress();
+        await this.syncWallet();
         const levelId = this.getSavedLevelId();
 
         await this.waitForInitialization();
@@ -825,9 +834,44 @@ export class GameManager extends Component {
         void this.tryClaimPendingTopUps();
     }
 
+    private async syncLevelProgress(): Promise<void> {
+        const remoteLevel = await pullLevelProgress();
+        const localLevel = SaveManager.getInstance().getCurrentLevel();
+        if (remoteLevel > localLevel) {
+            SaveManager.getInstance().saveCurrentLevel(remoteLevel, false);
+        }
+        this.refreshClipsButtonLabel();
+    }
+
+    /** Khôi phục coin từ Worker trước khi nhận order mới. Không để 20 coin chào mừng ghi đè. */
+    private async syncWallet(): Promise<void> {
+        const wallet = StarWallet.getInstance();
+        const remote = await pullWalletBalance();
+        if (remote.status === 'unavailable') {
+            StarWalletHud.Instance?.refreshBalance();
+            return;
+        }
+        const creditedIds = TopUpPendingStore.getInstance().getCreditedOrderIds();
+        let sealed = true;
+        if (remote.status === 'missing') {
+            if (!wallet.hasStoredBalance()) {
+                wallet.replaceBalance(STARTING_STAR_BALANCE);
+            }
+            sealed = await pushWalletBalance(wallet.getBalance(), false, creditedIds);
+        } else if (!wallet.hasStoredBalance() || remote.balance > wallet.getBalance()) {
+            wallet.replaceBalance(remote.balance);
+        } else if (wallet.getBalance() > remote.balance) {
+            sealed = await pushWalletBalance(wallet.getBalance(), false, creditedIds);
+        }
+        if (sealed) wallet.markRemoteReady();
+        StarWalletHud.Instance?.refreshBalance();
+    }
+
     private async tryClaimPendingTopUps(): Promise<void> {
         await this.waitForInitialization();
         try {
+            await this.syncLevelProgress();
+            await this.syncWallet();
             await TeviPaymentService.getInstance().claimPendingTopUps();
         } catch (error) {
             const message = error instanceof Error ? error.message : `${error}`;

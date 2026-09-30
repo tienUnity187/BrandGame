@@ -5,7 +5,7 @@ export const APP_ID = 'EMO78171';
 export const ENV = 'PRODUCTION';
 
 /** Phiên bản cấu hình gửi sang Tevi container. */
-export const VERSION = '1.0.17';
+export const VERSION = '1.0.18';
 
 /**
  * Bật bridge Tevi giả khi chạy Editor Preview hoặc Development Build.
@@ -39,6 +39,21 @@ export const REWARD_VIDEO_UNLOCK_LEVELS: readonly number[] = [
 
 export function isRewardVideoLevel(levelId: number): boolean {
     return REWARD_VIDEO_UNLOCK_LEVELS.indexOf(Math.floor(levelId)) >= 0;
+}
+
+/**
+ * Clip đã mở theo level đang chơi (level kế tiếp sau màn đã thắng).
+ * Mốc nhỏ hơn level hiện tại thì được xem lại. Không lưu danh sách clip.
+ */
+export function getUnlockedRewardClips(currentLevelId: number): Array<{ levelId: number; file: string }> {
+    const current = Math.floor(currentLevelId);
+    const clips: Array<{ levelId: number; file: string }> = [];
+    for (const levelId of REWARD_VIDEO_UNLOCK_LEVELS) {
+        if (levelId >= current) break;
+        const file = getRewardVideoFileName(levelId);
+        if (file) clips.push({ levelId, file });
+    }
+    return clips;
 }
 
 /** Tên object R2 theo thứ tự clip 1–13. Level không phải mốc → null. */
@@ -98,11 +113,26 @@ export const TEVI_TOP_UP_UNCLAIMED_URL =
 export const TEVI_TOP_UP_CLAIM_URL =
     `${WORKER_BASE_URL}/api/top-up-claim`;
 
+/**
+ * Số dư ví Tevi. Game không gọi developer-api trực tiếp:
+ * WebView product chặn CORS và báo "Load failed".
+ */
+export const TEVI_USER_BALANCE_PROXY_URL =
+    `${WORKER_BASE_URL}/api/user-balance`;
+
+/** Tiến trình level theo user Tevi — WebView không giữ localStorage giữa các lần mở. */
+export const TEVI_PROGRESS_URL =
+    `${WORKER_BASE_URL}/api/progress`;
+
+/** Số coin trong game theo user Tevi. Không lưu hạn, không xóa khi build mới. */
+export const TEVI_WALLET_URL =
+    `${WORKER_BASE_URL}/api/wallet`;
+
 /** Endpoint Tevi trực tiếp (Worker dùng; game không gọi thẳng). */
 export const TEVI_TOP_UP_SIGNATURE_URL =
     `${TEVI_API_BASE}/api/v1/payments/top-up-signature`;
 
-/** Số dư Star Tevi của user (Bearer user_app_token). */
+/** Số dư Star Tevi (Worker forward, Bearer user_app_token). */
 export const TEVI_USER_BALANCE_URL =
     `${TEVI_API_BASE}/api/v1/auth/user/balance`;
 
@@ -126,11 +156,12 @@ export interface StarTopUpPack {
     stars: number;
 }
 
-/** Gói nạp Star → Star (1:1). */
+/** Gói nạp: số Star Tevi trừ → số coin cộng vào game (1:1). */
 export const STAR_TOPUP_PACKS: readonly StarTopUpPack[] = [
-    { id: 'pack_100', label: '100 → 100', amount: 100, stars: 100 },
-    { id: 'pack_500', label: '500 → 500', amount: 500, stars: 500 },
-    { id: 'pack_1000', label: '1000 → 1000', amount: 1000, stars: 1000 },
+    { id: 'pack_1', label: '1 Star → 1', amount: 1, stars: 1 },
+    { id: 'pack_100', label: '100 Star → 100', amount: 100, stars: 100 },
+    { id: 'pack_500', label: '500 Star → 500', amount: 500, stars: 500 },
+    { id: 'pack_1000', label: '1000 Star → 1000', amount: 1000, stars: 1000 },
 ] as const;
 
 /** Các key localStorage dùng chung trong toàn bộ game. */

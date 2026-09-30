@@ -9,9 +9,12 @@ import {
     instantiate,
     Label,
     Layers,
+    Layout,
     Node,
     Prefab,
     resources,
+    Sprite,
+    SpriteFrame,
     UITransform,
     Widget,
     view,
@@ -70,6 +73,8 @@ export class StarWalletHud extends Component {
     private _topUpResultLoading = false;
     private _topUpResultReadyQueue: Array<() => void> = [];
     /** Giữ vài dòng status gần nhất — tránh mất JWT.app vì chạy quá nhanh. */
+    private _starSprite: SpriteFrame | null = null;
+    private _starSpriteWait: Array<{ ok: (sf: SpriteFrame) => void; fail: () => void }> = [];
     private _statusLines: string[] = [];
     private static readonly STATUS_MAX_LINES = 8;
     /** Popup claim chờ HUD/splash sẵn sàng. */
@@ -307,6 +312,7 @@ export class StarWalletHud extends Component {
     }
 
     private bindPackButtons(root: Node): void {
+        this.ensureOneStarButton(root);
         for (const pack of STAR_TOPUP_PACKS) {
             const btnNode = root.getChildByName(`Btn_${pack.id}`);
             if (!btnNode?.isValid) continue;
@@ -314,6 +320,7 @@ export class StarWalletHud extends Component {
             if (!btn) continue;
             btnNode.off(Button.EventType.CLICK);
             btnNode.on(Button.EventType.CLICK, () => void this.onPurchaseClicked(pack.id), this);
+            this.dressPackButton(btnNode, pack);
 
             if (EDITOR || PREVIEW) {
                 const mockNode = root.getChildByName(`Mock_${pack.id}`);
@@ -330,6 +337,122 @@ export class StarWalletHud extends Component {
             clearNode.off(Button.EventType.CLICK, this.onClearTokenClicked, this);
             clearNode.on(Button.EventType.CLICK, this.onClearTokenClicked, this);
         }
+        this.layoutPackButtons(root);
+    }
+
+    /** Scene chỉ có 100/500/1000 — nhân nút 100 thành gói 1 Star. */
+    private ensureOneStarButton(root: Node): void {
+        if (root.getChildByName('Btn_pack_1')?.isValid) return;
+        const template = root.getChildByName('Btn_pack_100');
+        if (!template?.isValid) return;
+        const clone = instantiate(template);
+        clone.name = 'Btn_pack_1';
+        clone.setParent(root);
+    }
+
+    /** 4 nút nằm dưới title Top Up, trong panel cao 575. */
+    private layoutPackButtons(root: Node): void {
+        const buttons = STAR_TOPUP_PACKS
+            .map(pack => root.getChildByName(`Btn_${pack.id}`))
+            .filter((node): node is Node => !!node?.isValid);
+        if (buttons.length < 4) return;
+        const startY = 148;
+        const step = 106;
+        buttons.forEach((node, index) => node.setPosition(0, startY - index * step, 0));
+    }
+
+    /** Nút gói: `100` + icon Star + `→` + `100` + icon coin. */
+    private dressPackButton(btnNode: Node, pack: { amount: number; stars: number }): void {
+        const source = btnNode.getChildByName('Label')?.getComponent(Label) || null;
+        let row = btnNode.getChildByName('ExchangeRow');
+        if (!row?.isValid) {
+            row = new Node('ExchangeRow');
+            row.layer = btnNode.layer;
+            row.setParent(btnNode);
+            row.setPosition(0, 2, 0);
+            row.addComponent(UITransform).setContentSize(280, 48);
+            const layout = row.addComponent(Layout);
+            layout.type = Layout.Type.HORIZONTAL;
+            layout.resizeMode = Layout.ResizeMode.CONTAINER;
+            layout.spacingX = 8;
+            layout.affectedByScale = true;
+
+            this.makePackText(row, 'Amount', `${pack.amount}`, source);
+            const star = new Node('Star');
+            star.layer = row.layer;
+            star.setParent(row);
+            star.addComponent(UITransform).setContentSize(36, 36);
+            const starSprite = star.addComponent(Sprite);
+            starSprite.sizeMode = Sprite.SizeMode.CUSTOM;
+            const starWord = this.makePackText(row, 'StarWord', 'Star', source);
+            starWord.node.active = false;
+            this.loadStarSprite(
+                sf => {
+                    starSprite.spriteFrame = sf;
+                    row.getComponent(Layout)?.updateLayout();
+                },
+                () => {
+                    star.active = false;
+                    starWord.node.active = true;
+                    row.getComponent(Layout)?.updateLayout();
+                },
+            );
+
+            this.makePackText(row, 'Arrow', '→', source);
+            this.makePackText(row, 'Coins', `${pack.stars}`, source);
+
+            const coin = btnNode.children.find(child => child.name.startsWith('Coin'));
+            if (coin?.isValid) coin.setParent(row);
+            const oldLabel = btnNode.getChildByName('Label');
+            if (oldLabel?.isValid) oldLabel.active = false;
+        }
+
+        const amountLabel = row.getChildByName('Amount')?.getComponent(Label);
+        const coinsLabel = row.getChildByName('Coins')?.getComponent(Label);
+        if (amountLabel) amountLabel.string = `${pack.amount}`;
+        if (coinsLabel) coinsLabel.string = `${pack.stars}`;
+        row.getComponent(Layout)?.updateLayout();
+    }
+
+    private makePackText(parent: Node, name: string, text: string, source: Label | null): Label {
+        const node = new Node(name);
+        node.layer = parent.layer;
+        node.setParent(parent);
+        node.addComponent(UITransform).setContentSize(40, 44);
+        const label = node.addComponent(Label);
+        label.string = text;
+        label.fontSize = source?.fontSize || 28;
+        label.lineHeight = source?.lineHeight || 32;
+        label.color = source?.color?.clone() || Color.WHITE;
+        label.overflow = Label.Overflow.NONE;
+        label.horizontalAlign = Label.HorizontalAlign.CENTER;
+        label.verticalAlign = Label.VerticalAlign.CENTER;
+        if (source?.font) {
+            label.font = source.font;
+            label.useSystemFont = false;
+        } else {
+            label.useSystemFont = true;
+            label.fontFamily = source?.fontFamily || 'Arial';
+        }
+        return label;
+    }
+
+    private loadStarSprite(ok: (sf: SpriteFrame) => void, fail: () => void): void {
+        if (this._starSprite) {
+            ok(this._starSprite);
+            return;
+        }
+        this._starSpriteWait.push({ ok, fail });
+        if (this._starSpriteWait.length > 1) return;
+        resources.load('skins/uma/ui/star/spriteFrame', SpriteFrame, (err, sf) => {
+            const wait = this._starSpriteWait.splice(0);
+            if (err || !sf) {
+                for (const item of wait) item.fail();
+                return;
+            }
+            this._starSprite = sf;
+            for (const item of wait) item.ok(sf);
+        });
     }
 
     private bindEditorTopBar(): void {
@@ -833,17 +956,17 @@ export class StarWalletHud extends Component {
             this.ensureTopUpResultPopup(() => {
                 const panel = TopUpResultPopupPanel.Instance;
                 if (!panel?.node?.isValid) {
-                    this.showResultPopup('Not enough coins', message);
+                    this.showResultPopup('Not enough stars', message);
                     return;
                 }
-                panel.show('Not enough coins', message, undefined, {
+                panel.show('Not enough stars', message, undefined, {
                     topUpBarSource: this.getCoinBarNode(),
                     walletShortage: { wallet, need },
                 });
             });
             return;
         }
-        const title = isCoinShortage ? 'Not enough coins' : 'Top-up failed';
+        const title = isCoinShortage ? 'Not enough stars' : 'Top-up failed';
         this.showResultPopup(title, message.replace(/★/g, '').replace(/\s{2,}/g, ' '));
     }
 

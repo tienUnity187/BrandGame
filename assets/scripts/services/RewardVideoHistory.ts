@@ -1,7 +1,7 @@
-import { sys } from 'cc';
-import { getRewardVideoFileName, isRewardVideoLevel, STORAGE_KEYS } from '../TeviConstants';
+import { getUnlockedRewardClips, getRewardVideoFileName, isRewardVideoLevel } from '../TeviConstants';
+import { SaveManager } from '../core/SaveManager';
 
-/** Một clip thưởng đã xem, lưu local để xem lại. */
+/** Clip thưởng suy ra từ level hiện tại, không lưu local. */
 export interface WatchedRewardVideo {
     levelId: number;
     file: string;
@@ -9,8 +9,7 @@ export interface WatchedRewardVideo {
 }
 
 /**
- * Lưu / đọc danh sách clip thưởng đã xem qua sys.localStorage.
- * Chỉ lưu levelId + tên file (không lưu signed URL tạm).
+ * Danh sách clip = các mốc thưởng đã qua so với level đang chơi.
  */
 export class RewardVideoHistory {
     private static _instance: RewardVideoHistory | null = null;
@@ -22,29 +21,13 @@ export class RewardVideoHistory {
         return RewardVideoHistory._instance;
     }
 
-    /** Đánh dấu clip của mốc level đã xem (upsert theo levelId). */
+    /** Giữ chữ ký cũ. Clip không ghi local — level đã lưu là đủ. */
     public markWatched(levelId: number): WatchedRewardVideo | null {
         const id = Math.floor(levelId);
         if (!Number.isFinite(id) || id <= 0 || !isRewardVideoLevel(id)) return null;
-
         const file = getRewardVideoFileName(id);
         if (!file) return null;
-        const entry: WatchedRewardVideo = {
-            levelId: id,
-            file,
-            watchedAt: Date.now(),
-        };
-
-        const list = this.getWatched();
-        const index = list.findIndex((item) => item.levelId === id);
-        if (index >= 0) {
-            list[index] = entry;
-        } else {
-            list.push(entry);
-        }
-        list.sort((a, b) => a.levelId - b.levelId);
-        this.save(list);
-        return entry;
+        return { levelId: id, file, watchedAt: 0 };
     }
 
     public hasWatched(levelId: number): boolean {
@@ -52,44 +35,17 @@ export class RewardVideoHistory {
         return this.getWatched().some((item) => item.levelId === id);
     }
 
-    /** Danh sách đã xem, sắp theo level tăng dần. */
+    /** Clip của mọi mốc nhỏ hơn level hiện tại. */
     public getWatched(): WatchedRewardVideo[] {
-        try {
-            const raw = sys.localStorage.getItem(STORAGE_KEYS.WATCHED_REWARD_VIDEOS);
-            if (!raw) return [];
-            const parsed = JSON.parse(raw);
-            if (!Array.isArray(parsed)) return [];
-
-            const result: WatchedRewardVideo[] = [];
-            for (const item of parsed) {
-                const levelId = Math.floor(Number(item?.levelId));
-                if (!Number.isFinite(levelId) || levelId <= 0) continue;
-                const file = getRewardVideoFileName(levelId) || '';
-                if (!file) continue;
-                const watchedAt = Number(item?.watchedAt);
-                result.push({
-                    levelId,
-                    file,
-                    watchedAt: Number.isFinite(watchedAt) && watchedAt > 0 ? watchedAt : 0,
-                });
-            }
-            result.sort((a, b) => a.levelId - b.levelId);
-            return result;
-        } catch (error) {
-            console.warn('[RewardVideoHistory] Không đọc được lịch sử clip:', error);
-            return [];
-        }
+        const currentLevel = SaveManager.getInstance().getCurrentLevel();
+        return getUnlockedRewardClips(currentLevel > 0 ? currentLevel : 1).map((clip) => ({
+            levelId: clip.levelId,
+            file: clip.file,
+            watchedAt: 0,
+        }));
     }
 
     public getCount(): number {
         return this.getWatched().length;
-    }
-
-    private save(list: WatchedRewardVideo[]): void {
-        try {
-            sys.localStorage.setItem(STORAGE_KEYS.WATCHED_REWARD_VIDEOS, JSON.stringify(list));
-        } catch (error) {
-            console.warn('[RewardVideoHistory] Không lưu được lịch sử clip:', error);
-        }
     }
 }

@@ -11,13 +11,14 @@ import {
     TEVI_TOP_UP_STATUS_URL,
     TEVI_TOP_UP_SDK_REPORT_URL,
     TEVI_TOP_UP_UNCLAIMED_URL,
-    TEVI_USER_BALANCE_URL,
+    TEVI_USER_BALANCE_PROXY_URL,
     VERSION,
     ENABLE_DEBUG_LOGS,
 } from '../TeviConstants';
 import { EventBus } from '../core/EventBus';
 import { GameEvent } from '../enums/GameEvent';
 import { StarWallet } from './StarWallet';
+import { pushWalletCredit } from './WalletSync';
 import { TopUpPendingStore } from './TopUpPendingStore';
 import { StarWalletHud } from '../ui/StarWalletHud';
 
@@ -79,7 +80,7 @@ interface TopUpSignatureResponse {
  * 1) Xin user_app_token (payment.write)
  * 2) POST Worker top-up-signature → deposit_token + order_id
  * 3) TeviJS.topup({ deposit_token, amount })
- * 4) TeviJS.topup call=ok = Tevi đã trừ Star — cộng ★ ngay (không chờ KV/webhook ~60s)
+ * 4) Chỉ cộng ★ khi TeviJS.topup trả call=ok và không có mã lỗi. Hủy / callback khác = không cộng.
  * 5) Báo Worker sdk-report để mark paid cùng colo user; webhook chỉ là backup claim
  */
 export class TeviPaymentService {
@@ -102,6 +103,22 @@ export class TeviPaymentService {
             TeviPaymentService._instance = new TeviPaymentService();
         }
         return TeviPaymentService._instance;
+    }
+
+    /**
+     * Đã trừ Star trên Tevi hay chưa.
+     * Hủy bỏ thường trả callback không có error_code — không được coi là thành công.
+     */
+    public static isTopupCallbackPaid(response: Record<string, unknown> | null | undefined): boolean {
+        if (!response) return false;
+        const call = `${response.call ?? ''}`.trim().toLowerCase();
+        if (call !== 'ok') return false;
+        const code = response.error_code;
+        const hasError = code !== undefined && code !== null && `${code}` !== '' && `${code}` !== '0';
+        if (hasError) return false;
+        const text = `${response.error_message ?? ''} ${response.message ?? ''} ${response.status ?? ''}`.toLowerCase();
+        if (/cancel|hủy|huy|abort|dismiss/.test(text)) return false;
+        return true;
     }
 
     /** Editor/test: trần thời gian xác nhận sau SDK — phải << 60s KV lag. */
@@ -335,7 +352,7 @@ export class TeviPaymentService {
 
             if (stars <= 0) continue;
 
-            const balance = this.creditPaidOrder(orderId, stars, `topup:claim:${orderId}`);
+            const balance = await this.creditPaidOrder(orderId, stars, `topup:claim:${orderId}`);
             claimed.push({ orderId, stars });
             totalStars += stars;
             void this.notifyWorkerClaim(userToken, orderId);
@@ -457,15 +474,15 @@ export class TeviPaymentService {
                 );
             }
 
-            report(`1/6 Checking Tevi wallet (${TEVI_USER_BALANCE_URL})...`);
+            report(`1/6 Checking Tevi wallet via Worker (${TEVI_USER_BALANCE_PROXY_URL})...`);
             const teviBalance = await this.fetchTeviWalletBalance(userToken, report);
             report(`1/6 Tevi wallet balance=${teviBalance} need=${pack.amount}`);
             if (teviBalance < pack.amount) {
                 throw new Error(
-                    `Not enough coins.\n`
-                    + `Your wallet: ${teviBalance}\n`
-                    + `This pack needs: ${pack.amount}\n\n`
-                    + `Top up your Tevi wallet first, then try again.`,
+                    `Not enough stars.\n`
+                    + `Your wallet: ${teviBalance} Star\n`
+                    + `This pack needs: ${pack.amount} Star\n\n`
+                    + `Top up Stars in Tevi first, then try again.`,
                 );
             }
 
@@ -508,7 +525,7 @@ export class TeviPaymentService {
                 report('5/6 Worker status still pending — credit from SDK (Tevi already charged)');
             }
 
-            const balance = this.creditPaidOrder(
+            const balance = await this.creditPaidOrder(
                 orderId,
                 pack.stars,
                 `topup:${pack.id}:${orderId}`,
@@ -568,7 +585,7 @@ export class TeviPaymentService {
         await this.delay(80);
 
         const orderId = `mock-${pack.id}-${Date.now()}`;
-        const balance = this.creditPaidOrder(orderId, pack.stars, `mock:${pack.id}:${orderId}`);
+        const balance = await this.creditPaidOrder(orderId, pack.stars, `mock:${pack.id}:${orderId}`);
         const elapsed = Date.now() - started;
         const message =
             `[Mock] 6/6 SUCCESS → +${pack.stars} | Total ${balance}`
@@ -600,7 +617,7 @@ export class TeviPaymentService {
             };
         }
         const orderId = `editor-sdk-${pack.id}-${Date.now()}`;
-        const balance = this.creditPaidOrder(orderId, pack.stars, `editor-sdk:${pack.id}`);
+        const balance = this.applyLocalCredit(orderId, pack.stars, `editor-sdk:${pack.id}`);
         return { ok: true, stars: pack.stars, balance, confirmBudgetMs, orderId };
     }
 
@@ -617,14 +634,17 @@ export class TeviPaymentService {
         return new Promise(resolve => setTimeout(resolve, ms));
     }
 
-    /** GET Tevi user balance — trả về số Star trong ví Tevi (không phải ví game). */
+    /**
+     * GET số Star trong ví Tevi (không phải ví game).
+     * Gọi Worker — WebView product chặn fetch thẳng developer-api ("Load failed").
+     */
     private async fetchTeviWalletBalance(
         userToken: string,
         report?: PaymentStatusCallback,
     ): Promise<number> {
         let response: Response;
         try {
-            response = await fetch(TEVI_USER_BALANCE_URL, {
+            response = await fetch(TEVI_USER_BALANCE_PROXY_URL, {
                 method: 'GET',
                 headers: {
                     'Authorization': `Bearer ${userToken}`,
@@ -633,13 +653,24 @@ export class TeviPaymentService {
             });
         } catch (error) {
             const message = error instanceof Error ? error.message : `${error}`;
-            throw new Error(`Cannot check Tevi wallet balance: ${message}`);
+            throw new Error(
+                `Cannot check Tevi wallet balance: ${message}. `
+                + `Worker ${TEVI_USER_BALANCE_PROXY_URL}`,
+            );
+        }
+
+        if (response.status === 404) {
+            throw new Error(
+                'Cannot check Tevi wallet balance: Worker chưa có /api/user-balance. '
+                + 'Dán tools/cloudflare-worker.js bản 1.0.22 lên Cloudflare rồi Deploy.',
+            );
         }
 
         let payload: {
             success?: boolean;
             message?: string;
             error_code?: string | number | null;
+            tevi_url?: string;
             data?: { amount?: number; currency?: string } | null;
             amount?: number;
         } = {};
@@ -652,17 +683,71 @@ export class TeviPaymentService {
         if (!response.ok || payload.success === false) {
             const apiMsg = typeof payload.message === 'string' ? payload.message.trim() : '';
             const errorCode = payload.error_code != null ? `${payload.error_code}` : '';
+            const teviUrl = typeof payload.tevi_url === 'string' ? payload.tevi_url.trim() : '';
             throw new Error(
                 `Tevi balance HTTP ${response.status}`
                 + (apiMsg ? `: ${apiMsg}` : '')
-                + (errorCode ? ` (code=${errorCode})` : ''),
+                + (errorCode ? ` (code=${errorCode})` : '')
+                + (teviUrl && !apiMsg.includes(teviUrl) ? ` | ${teviUrl}` : ''),
             );
         }
 
-        const rawAmount = payload.data?.amount ?? payload.amount ?? 0;
-        const balance = Math.max(0, Math.floor(Number(rawAmount) || 0));
-        report?.(`Tevi wallet: ${balance} coins`);
+        const balance = this.extractTeviStarBalance(payload);
+        if (balance == null) {
+            throw new Error('Cannot read Tevi star balance from API.');
+        }
+        report?.(`Tevi wallet: ${balance} Star`);
         return balance;
+    }
+
+    /**
+     * Tevi đôi khi trả `data.amount`, đôi khi `data.balance.amount` (currency TVS/STAR).
+     * Đọc nhầm field thì ví 20 Star bị hiện thành 0.
+     */
+    private extractTeviStarBalance(payload: {
+        data?: unknown;
+        amount?: unknown;
+        balance?: unknown;
+        currency?: unknown;
+    }): number | null {
+        const picks: { value: number; currency: string }[] = [];
+        const push = (amount: unknown, currency: unknown) => {
+            if (amount == null || typeof amount === 'object') return;
+            const value = Number(amount);
+            if (!Number.isFinite(value)) return;
+            picks.push({ value, currency: `${currency ?? ''}`.trim().toLowerCase() });
+        };
+        const visit = (node: unknown) => {
+            if (!node || typeof node !== 'object') return;
+            if (Array.isArray(node)) {
+                for (const item of node) visit(item);
+                return;
+            }
+            const rec = node as Record<string, unknown>;
+            const currency = rec.currency ?? rec.asset ?? rec.code ?? rec.type;
+            if ('amount' in rec) push(rec.amount, currency);
+            if ('balance' in rec && (rec.balance == null || typeof rec.balance !== 'object')) {
+                push(rec.balance, currency || 'star');
+            }
+            for (const key of ['star', 'stars', 'star_balance', 'tvs']) {
+                if (key in rec) push(rec[key], key);
+            }
+            if (rec.balance && typeof rec.balance === 'object') visit(rec.balance);
+            if (Array.isArray(rec.balances)) visit(rec.balances);
+            if (Array.isArray(rec.wallets)) visit(rec.wallets);
+        };
+
+        visit(payload.data ?? payload);
+        if (picks.length === 0) return null;
+
+        const starPicks = picks.filter(pick => /star|tvs|tevi/.test(pick.currency));
+        const pool = starPicks.length > 0
+            ? starPicks
+            : picks.filter(pick => !/usd|usdt|vnd|dollar/.test(pick.currency));
+        const usable = pool.length > 0 ? pool : picks;
+        const positive = usable.find(pick => pick.value > 0);
+        const chosen = positive ?? usable[0];
+        return Math.max(0, Math.floor(chosen.value));
     }
 
     /** Game → Worker → Tevi API; Worker lưu order pending (KV). */
@@ -799,13 +884,24 @@ export class TeviPaymentService {
         return false;
     }
 
-    private creditPaidOrder(orderId: string, stars: number, reason: string): number {
+    /** Cộng trên máy ngay. Không đẩy số tuyệt đối — order credit trên Worker mới là bản giữ lâu. */
+    private applyLocalCredit(orderId: string, stars: number, reason: string): number {
         const store = TopUpPendingStore.getInstance();
-        if (store.isCredited(orderId)) {
-            return StarWallet.getInstance().getBalance();
-        }
-        const balance = StarWallet.getInstance().addStars(stars, reason);
+        const wallet = StarWallet.getInstance();
+        if (store.isCredited(orderId)) return wallet.getBalance();
+        const balance = wallet.addStars(stars, reason, false);
         store.markCredited(orderId);
+        return balance;
+    }
+
+    private async creditPaidOrder(orderId: string, stars: number, reason: string): Promise<number> {
+        const wallet = StarWallet.getInstance();
+        const balance = this.applyLocalCredit(orderId, stars, reason);
+        const saved = await pushWalletCredit(orderId, stars, balance);
+        if (saved && (saved.already || saved.balance !== balance)) {
+            wallet.replaceBalance(saved.balance);
+            return saved.balance;
+        }
         return balance;
     }
 
@@ -1030,18 +1126,25 @@ export class TeviPaymentService {
                         const normalized = (response && typeof response === 'object')
                             ? response as Record<string, unknown>
                             : { raw: response };
-                        const code = response?.error_code;
-                        const callOk = `${(response as any)?.call || ''}` === 'ok';
-                        const hasError = code !== undefined && code !== null && `${code}` !== '' && `${code}` !== '0';
-                        if (hasError && !callOk) {
+                        if (!TeviPaymentService.isTopupCallbackPaid(normalized)) {
+                            const call = `${normalized.call ?? ''}`.trim().toLowerCase();
+                            const code = normalized.error_code;
+                            const detail = normalized.error_message || normalized.message;
+                            const cancelled = call === ''
+                                || call === 'cancel'
+                                || call === 'canceled'
+                                || call === 'cancelled'
+                                || /cancel|hủy|huy|abort|dismiss/.test(`${call} ${detail ?? ''}`.toLowerCase());
                             reject(new Error(
-                                `TeviJS.topup error code=${code}`
-                                + (response.error_message ? `: ${response.error_message}` : '')
-                                + (response.message ? ` (${response.message})` : ''),
+                                cancelled
+                                    ? 'Top-up cancelled. No coins were added.'
+                                    : `TeviJS.topup error code=${code ?? '-'}`
+                                        + ` call=${call || '-'}`
+                                        + (detail ? `: ${detail}` : ''),
                             ));
                             return;
                         }
-                        report(`TeviJS.topup callback OK (code=${code ?? 0}, call=${(response as any)?.call ?? '-'})`);
+                        report(`TeviJS.topup callback OK (code=${normalized.error_code ?? 0}, call=ok)`);
                         resolve(normalized);
                     },
                 );

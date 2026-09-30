@@ -25,6 +25,8 @@ const { ccclass, property } = _decorator;
 
 /** Tỷ lệ mặc định khi chưa đọc được metadata (landscape 16:9). */
 const DEFAULT_VIDEO_ASPECT = 16 / 9;
+const LOADING_CLIP_TEXT = 'Loading clip...';
+const CLIP_LOAD_FAILED_TEXT = 'Unable to load clip.';
 
 interface RewardVideoTokenResponse {
     videoUrl?: string;
@@ -53,8 +55,13 @@ export class RewardVideoPlayer extends Component {
     public videoContainer: Node | null = null;
 
     private _closeButton: Button | null = null;
+    /** Trạng thái cho người chơi (Loading / lỗi). Trên web dùng DOM để nổi trên thẻ video. */
+    private _statusLabel: Label | null = null;
     /** Nút X HTML nằm trên thẻ <video> (web/Tevi) vì video DOM thường đè canvas. */
     private _domCloseButton: HTMLButtonElement | null = null;
+    private _domStatus: HTMLDivElement | null = null;
+    /** Nền trang (#333) lộ ở hai dải SHOW_ALL — trả lại khi đóng clip. */
+    private _letterboxRestore: { el: HTMLElement; background: string; backgroundColor: string }[] | null = null;
     private _onClosedCallback: (() => void) | null = null;
     private _isClosing: boolean = false;
     private _isPlaying: boolean = false;
@@ -84,7 +91,7 @@ export class RewardVideoPlayer extends Component {
 
     protected onDestroy(): void {
         this.unbindEvents();
-        this.removeDomCloseButton();
+        this.removePlaybackChrome();
         if (this._audioPausedByVideo) {
             AudioManager.getInstance()?.resumeAllGameAudio();
             this._audioPausedByVideo = false;
@@ -178,8 +185,7 @@ export class RewardVideoPlayer extends Component {
         if (parent) {
             this.videoContainer.setSiblingIndex(parent.children.length - 1);
         }
-        this.placeCloseButtonTopRight();
-        this.showDomCloseButton();
+        this.presentPlaybackChrome();
         this.logStatus(`Popup video đã mở, đang xin token cho ${fileName}...`);
 
         try {
@@ -435,11 +441,13 @@ export class RewardVideoPlayer extends Component {
     private onVideoError(): void {
         this.logStatus(`VideoPlayer ERROR | LINK=${this.shortenUrl(this._lastVideoUrl)}`);
         console.error('[RewardVideoPlayer] VideoPlayer ERROR, URL:', this._lastVideoUrl);
+        this.setPlaybackStatus(CLIP_LOAD_FAILED_TEXT);
         // Không auto-close; user bấm X. Tránh ghi đè status bằng "Đã đóng video".
     }
 
     private onVideoPlaying(): void {
         this._hasStartedPlaying = true;
+        this.setPlaybackStatus(null);
         this.logStatus(`PLAYING OK | LINK=${this.shortenUrl(this._lastVideoUrl)}`);
         this.applyFitWidthLayout();
     }
@@ -482,7 +490,7 @@ export class RewardVideoPlayer extends Component {
             this.videoContainer.active = false;
         }
 
-        this.removeDomCloseButton();
+        this.removePlaybackChrome();
         this.resumeGameAudio();
 
         const callback = this._onClosedCallback;
@@ -544,12 +552,117 @@ export class RewardVideoPlayer extends Component {
 
         // Ép thẻ <video> DOM theo đúng khung đã tính (web / Tevi WebView).
         this.forceDomVideoFit(videoW, videoH);
-
+        this.fillOverlayFullScreen();
         this.placeCloseButtonTopRight(screenW, screenH);
     }
 
-    /** Nút đóng luôn góc trên bên phải, trên cùng để bấm được. */
+    /**
+     * SHOW_ALL khóa khung 1080×1920 giữa màn hình. Graphics chỉ phủ canvas,
+     * hai dải trên/dưới là nền body (#333). Bôi đen cả khung trang khi đang xem clip.
+     */
+    private presentPlaybackChrome(): void {
+        this.fillOverlayFullScreen();
+        this.paintLetterboxBlack();
+        this.placeCloseButtonTopRight();
+        this.setPlaybackStatus(LOADING_CLIP_TEXT);
+    }
+
+    private removePlaybackChrome(): void {
+        this.removeDomCloseButton();
+        this.removeDomStatus();
+        this.restoreLetterbox();
+        this.setPlaybackStatus(null);
+    }
+
+    /** null = ẩn. Web dùng DOM (nổi trên <video>); native dùng Label trong canvas. */
+    private setPlaybackStatus(message: string | null): void {
+        const showing = !!message;
+        if (this.hasDocument()) {
+            if (showing) {
+                this.ensureDomStatus();
+            }
+            if (this._domStatus) {
+                this._domStatus.textContent = message ?? '';
+                this._domStatus.style.display = showing ? 'block' : 'none';
+            }
+            if (this._statusLabel?.node?.isValid) {
+                this._statusLabel.node.active = false;
+            }
+            return;
+        }
+
+        if (showing) {
+            this.ensureStatusLabel();
+        }
+        if (!this._statusLabel?.node?.isValid) return;
+        this._statusLabel.string = message ?? '';
+        this._statusLabel.node.active = showing;
+        const parent = this._statusLabel.node.parent;
+        if (showing && parent) {
+            this._statusLabel.node.setSiblingIndex(parent.children.length - 1);
+        }
+    }
+
+    private hasDocument(): boolean {
+        return typeof document !== 'undefined';
+    }
+
+    private paintLetterboxBlack(): void {
+        if (!this.hasDocument() || this._letterboxRestore) return;
+        const elements = this.collectLetterboxElements();
+        this._letterboxRestore = elements.map((el) => ({
+            el,
+            background: el.style.background,
+            backgroundColor: el.style.backgroundColor,
+        }));
+        for (const el of elements) {
+            el.style.setProperty('background-color', '#000000', 'important');
+        }
+    }
+
+    private restoreLetterbox(): void {
+        if (!this._letterboxRestore) return;
+        for (const item of this._letterboxRestore) {
+            item.el.style.removeProperty('background-color');
+            item.el.style.background = item.background;
+            if (item.backgroundColor) {
+                item.el.style.backgroundColor = item.backgroundColor;
+            }
+        }
+        this._letterboxRestore = null;
+    }
+
+    /** html/body/GameDiv — không đụng canvas, kẻo nền che video nằm sau canvas. */
+    private collectLetterboxElements(): HTMLElement[] {
+        const found: HTMLElement[] = [];
+        const push = (el: HTMLElement | null | undefined): void => {
+            if (!el || found.indexOf(el) >= 0) return;
+            if (el.tagName === 'CANVAS') return;
+            found.push(el);
+        };
+        push(document.documentElement);
+        push(document.body);
+        push(document.getElementById('GameDiv'));
+        push(document.getElementById('Cocos3dGameContainer'));
+        const canvas = document.getElementById('GameCanvas') || document.querySelector('canvas');
+        push(canvas?.parentElement);
+        push(canvas?.parentElement?.parentElement);
+        return found;
+    }
+
+    /** Nút đóng luôn góc trên bên phải. Web chỉ giữ nút DOM để không trùng nút X trên canvas. */
     private placeCloseButtonTopRight(screenW?: number, screenH?: number): void {
+        if (this.hasDocument()) {
+            const container = this.videoContainer;
+            if (container?.isValid) {
+                for (const child of container.children) {
+                    if (child.name === 'BtnClose') child.active = false;
+                }
+            }
+            this.showDomCloseButton();
+            return;
+        }
+
         if (!this._closeButton?.node?.isValid) {
             this.ensureCloseButton();
         }
@@ -568,19 +681,22 @@ export class RewardVideoPlayer extends Component {
         }
     }
 
-    /** Web/Tevi: nút X HTML góc trên phải, z-index cao hơn thẻ video. */
+    /** Web/Tevi: một nút X HTML góc trên phải, z-index cao hơn thẻ video. */
     private showDomCloseButton(): void {
-        if (typeof document === 'undefined') return;
+        if (!this.hasDocument()) return;
+        if (this._domCloseButton?.isConnected) return;
         this.removeDomCloseButton();
+        document.querySelectorAll('[data-sg-reward-close]').forEach((el) => el.remove());
 
         const btn = document.createElement('button');
         btn.type = 'button';
         btn.textContent = 'X';
-        btn.setAttribute('aria-label', 'Đóng video');
+        btn.setAttribute('aria-label', 'Close');
+        btn.setAttribute('data-sg-reward-close', '1');
         btn.style.cssText = [
             'position:fixed',
-            'top:16px',
-            'right:16px',
+            'top:calc(12px + env(safe-area-inset-top, 0px))',
+            'right:calc(12px + env(safe-area-inset-right, 0px))',
             'z-index:2147483647',
             'width:48px',
             'height:48px',
@@ -606,13 +722,103 @@ export class RewardVideoPlayer extends Component {
     }
 
     private removeDomCloseButton(): void {
-        if (!this._domCloseButton) return;
-        try {
-            this._domCloseButton.remove();
-        } catch {
-            // ignore
+        if (this.hasDocument()) {
+            document.querySelectorAll('[data-sg-reward-close]').forEach((el) => el.remove());
         }
         this._domCloseButton = null;
+    }
+
+    private ensureDomStatus(): void {
+        if (!this.hasDocument()) return;
+        if (this._domStatus?.isConnected) return;
+        this.removeDomStatus();
+
+        const status = document.createElement('div');
+        status.setAttribute('data-sg-reward-status', '1');
+        status.style.cssText = [
+            'position:fixed',
+            'left:50%',
+            'top:50%',
+            'transform:translate(-50%, -50%)',
+            'z-index:2147483646',
+            'max-width:80%',
+            'color:#fff',
+            'font-family:Helvetica, Arial, sans-serif',
+            'font-size:28px',
+            'font-weight:700',
+            'line-height:1.35',
+            'text-align:center',
+            'pointer-events:none',
+            'text-shadow:0 2px 8px rgba(0,0,0,0.85)',
+        ].join(';');
+        document.body.appendChild(status);
+        this._domStatus = status;
+    }
+
+    private removeDomStatus(): void {
+        if (this.hasDocument()) {
+            document.querySelectorAll('[data-sg-reward-status]').forEach((el) => el.remove());
+        }
+        this._domStatus = null;
+    }
+
+    /** Graphics không tự giãn theo Widget — vẽ tràn để phủ kín canvas. */
+    private fillOverlayFullScreen(): void {
+        const overlay = this.ensureOverlayNode();
+        if (!overlay) return;
+        const graphics = overlay.getComponent(Graphics);
+        if (!graphics) return;
+        const size = 8000;
+        const transform = overlay.getComponent(UITransform);
+        transform?.setContentSize(size, size);
+        graphics.clear();
+        graphics.fillColor = new Color(0, 0, 0, 255);
+        graphics.rect(-size * 0.5, -size * 0.5, size, size);
+        graphics.fill();
+    }
+
+    private ensureOverlayNode(): Node | null {
+        if (!this.videoContainer?.isValid) return null;
+        let overlay = this.videoContainer.getChildByName('Overlay');
+        if (!overlay?.isValid) {
+            overlay = new Node('Overlay');
+            overlay.layer = Layers.Enum.UI_2D;
+            overlay.setParent(this.videoContainer);
+            overlay.setSiblingIndex(0);
+            overlay.addComponent(UITransform);
+            overlay.addComponent(Graphics);
+        }
+        return overlay;
+    }
+
+    private ensureStatusLabel(): void {
+        if (!this.videoContainer?.isValid) return;
+        if (this._statusLabel?.node?.isValid) return;
+
+        const existing = this.videoContainer.getChildByName('Status');
+        if (existing?.isValid) {
+            this._statusLabel = existing.getComponent(Label);
+            if (this._statusLabel) return;
+        }
+
+        const statusNode = existing?.isValid ? existing : new Node('Status');
+        statusNode.layer = Layers.Enum.UI_2D;
+        if (!statusNode.parent) {
+            statusNode.setParent(this.videoContainer);
+        }
+        statusNode.setPosition(0, 0, 0);
+        const transform = statusNode.getComponent(UITransform) || statusNode.addComponent(UITransform);
+        transform.setContentSize(900, 120);
+        const label = statusNode.getComponent(Label) || statusNode.addComponent(Label);
+        label.string = '';
+        label.fontSize = 42;
+        label.lineHeight = 52;
+        label.color = Color.WHITE;
+        label.horizontalAlign = Label.HorizontalAlign.CENTER;
+        label.verticalAlign = Label.VerticalAlign.CENTER;
+        label.overflow = Label.Overflow.SHRINK;
+        statusNode.active = false;
+        this._statusLabel = label;
     }
 
     /** Báo engine sync lại DOM theo contentSize mới (không dùng pixel gốc). */
@@ -708,7 +914,10 @@ export class RewardVideoPlayer extends Component {
     /** Tạo UI tối thiểu nếu chưa gán trong Inspector. */
     private ensureUi(): void {
         if (this.videoPlayer && this.videoContainer) {
+            this.ensureOverlayNode();
+            this.fillOverlayFullScreen();
             this.ensureCloseButton();
+            this.ensureStatusLabel();
             AudioManager.getInstance()?.bindButtonSounds(this.node);
             return;
         }
@@ -752,10 +961,7 @@ export class RewardVideoPlayer extends Component {
         overlayWidget.left = 0;
         overlayWidget.right = 0;
         overlayWidget.alignMode = Widget.AlignMode.ON_WINDOW_RESIZE;
-        const graphics = overlay.addComponent(Graphics);
-        graphics.fillColor = new Color(0, 0, 0, 230);
-        graphics.rect(-width * 0.5, -height * 0.5, width, height);
-        graphics.fill();
+        overlay.addComponent(Graphics);
 
         const videoNode = new Node('RewardVideo');
         videoNode.layer = Layers.Enum.UI_2D;
@@ -771,7 +977,9 @@ export class RewardVideoPlayer extends Component {
         container.active = false;
         this.videoContainer = container;
         this.videoPlayer = videoPlayer;
+        this.fillOverlayFullScreen();
         this.ensureCloseButton();
+        this.ensureStatusLabel();
         AudioManager.getInstance()?.bindButtonSounds(this.node);
     }
 
@@ -780,6 +988,7 @@ export class RewardVideoPlayer extends Component {
         if (!this.videoContainer) return;
 
         if (this._closeButton?.node?.isValid) {
+            if (this.hasDocument()) this._closeButton.node.active = false;
             return;
         }
 
@@ -788,6 +997,7 @@ export class RewardVideoPlayer extends Component {
             || null;
         if (existing?.isValid) {
             this._closeButton = existing.getComponent(Button);
+            if (this.hasDocument()) existing.active = false;
             if (this._eventsBound && this._closeButton) {
                 this._closeButton.node.off(Button.EventType.CLICK, this.btnClose, this);
                 this._closeButton.node.on(Button.EventType.CLICK, this.btnClose, this);
@@ -831,9 +1041,11 @@ export class RewardVideoPlayer extends Component {
         closeLabel.color = Color.WHITE;
         closeLabel.horizontalAlign = Label.HorizontalAlign.CENTER;
         closeLabel.verticalAlign = Label.VerticalAlign.CENTER;
-        closeLabel.isBold = true;
 
         this._closeButton = closeButton;
+        if (this.hasDocument()) {
+            closeNode.active = false;
+        }
         if (this._eventsBound) {
             this._closeButton.node.on(Button.EventType.CLICK, this.btnClose, this);
         }

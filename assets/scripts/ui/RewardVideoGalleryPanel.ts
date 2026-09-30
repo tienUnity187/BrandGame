@@ -18,8 +18,6 @@ import {
 import { EventBus } from '../core/EventBus';
 import { GameEvent } from '../enums/GameEvent';
 import { RewardVideoHistory, WatchedRewardVideo } from '../services/RewardVideoHistory';
-import { REWARD_VIDEO_UNLOCK_LEVELS } from '../TeviConstants';
-import { TeviLoginManager } from '../TeviLoginManager';
 import { BasePanel } from './BasePanel';
 import { RewardVideoPlayer } from './RewardVideoPlayer';
 import { AudioManager } from '../managers/AudioManager';
@@ -130,7 +128,7 @@ export class RewardVideoGalleryPanel extends BasePanel {
         if (this.emptyLabel) {
             this.emptyLabel.node.active = watched.length === 0;
             if (watched.length === 0) {
-                this.emptyLabel.string = `No clips yet.\nBeat levels ${REWARD_VIDEO_UNLOCK_LEVELS.join(', ')} to unlock clips.`;
+                this.emptyLabel.string = 'No clips yet.\nClear a reward level to unlock earlier clips.';
             }
         }
 
@@ -212,21 +210,19 @@ export class RewardVideoGalleryPanel extends BasePanel {
     }
 
     private onClipClicked(entry: WatchedRewardVideo): void {
-        TeviLoginManager.Instance?.setDebugStatus(
-            `Clip replay Lv${entry.levelId} → ${entry.file}`,
-        );
-
         const player = this.resolveVideoPlayer();
-        if (!player) {
+        if (!player?.node?.isValid) {
             console.warn('[RewardVideoGallery] RewardVideoPlayer not available.');
-            TeviLoginManager.Instance?.setDebugStatus('Clip replay FAIL: no RewardVideoPlayer');
             return;
         }
+        const file = entry.file;
+        const levelId = entry.levelId;
+        // Gallery bị destroy khi đóng — không được hẹn play trên component này.
         this.close();
-        // Defer 1 frame so gallery close does not hide the player layer underneath.
-        this.scheduleOnce(() => {
+        setTimeout(() => {
+            if (!player.node?.isValid) return;
             player.mountOnVisibleRoot();
-            player.playSecretVideo(entry.file, undefined, entry.levelId);
+            player.playSecretVideo(file, undefined, levelId);
         }, 0);
     }
 

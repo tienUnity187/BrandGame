@@ -1,5 +1,6 @@
 import { sys } from 'cc';
 import { GAME_NAME } from './GameBrandConfig';
+import { pushLevelProgress } from '../services/ProgressSync';
 
 /**
  * SaveManager - Lưu/đọc tiến trình game trên thiết bị.
@@ -24,11 +25,12 @@ export class SaveManager {
         return SaveManager._instance;
     }
 
-    public saveCurrentLevel(levelId: number): void {
+    public saveCurrentLevel(levelId: number, syncRemote: boolean = true): void {
         if (!SaveManager.ENABLE_LEVEL_PROGRESS_SAVE) return;
         try {
             const safeId = SaveManager.clampLevelId(levelId);
             sys.localStorage.setItem(SaveManager.KEY, `${safeId}`);
+            if (syncRemote) pushLevelProgress(safeId);
         } catch (err) {
         }
     }
